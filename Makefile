@@ -39,7 +39,7 @@ LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir)) $(PKG_CONFIG) \
 LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
 
 
-# Uncomment to enable quiet compilation
+Uncomment to enable quiet compilation
 # Q = @
 
 all: $(EXEC)

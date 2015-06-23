@@ -48,7 +48,7 @@ void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
   }
 }
 
-int caffe_main(int argc, char** argv) {
+int main(int argc, char** argv) {
   // Print output to stderr (while still logging).
   FLAGS_alsologtostderr = 1;
   caffe::GlobalInit(&argc, &argv);
@@ -98,7 +98,7 @@ int caffe_main(int argc, char** argv) {
   #include <SDL.h>
 #endif
 
-int main(int argc, char** argv) {
+int ale_main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " rom_file" << std::endl;
         return 1;
