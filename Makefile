@@ -14,11 +14,23 @@ LIBRARIES += cblas atlas
 INCLUDE_DIRS += $(BLAS_INCLUDE)
 LIBRARY_DIRS += $(BLAS_LIB)
 
+ALE_ROOT := /home/wyl8899/projects/ale
+ALE_INCLUDE := $(ALE_ROOT)/src
+ALE_LIB := $(ALE_ROOT)
+INCLUDE_DIRS += $(ALE_INCLUDE)
+LIBRARY_DIRS += $(ALE_LIB)
+COMMON_FLAGS += -lale
+
 COMMON_FLAGS += -DCPU_ONLY
 LIBRARIES += glog gflags protobuf leveldb snappy \
 	lmdb boost_system hdf5_hl hdf5 m \
 	opencv_core opencv_highgui opencv_imgproc
 WARNINGS := -Wall -Wno-sign-compare
+
+SDL_INCLUDE := /usr/include/SDL
+INCLUDE_DIRS += $(SDL_INCLUDE)
+CXXFLAGS += -D__USE_SDL
+COMMON_FLAGS += -lSDL
 
 COMMON_FLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 CXXFLAGS += -pthread -fPIC $(COMMON_FLAGS)
@@ -26,14 +38,18 @@ LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir)) $(PKG_CONFIG) \
 		$(foreach library,$(LIBRARIES),-l$(library))
 LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
 
+
+# Uncomment to enable quiet compilation
+# Q = @
+
 all: $(EXEC)
 
 $(EXEC): $(EXEC).o
-	@ g++ $< -o $@ $(LINKFLAGS) -l$(PROJECT) $(LDFLAGS) \
+	$(Q) g++ $< -o $@ $(LINKFLAGS) -l$(PROJECT) $(LDFLAGS) \
 		-Wl,-rpath,$(CAFFE_LIB) 
 	
 $(EXEC).o : $(EXEC).cpp
-	@ g++ $< $(CXXFLAGS) -c -o $@
+	$(Q) g++ $< $(CXXFLAGS) -c -o $@
 	
 clean:
 	rm $(EXEC).o $(EXEC)
