@@ -1,5 +1,4 @@
 PROJECT := caffe
-EXEC := caffe
 
 CAFFE_ROOT := /home/wyl8899/projects/caffe
 CAFFE_INCLUDE := $(CAFFE_ROOT)/include
@@ -38,18 +37,28 @@ LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir)) $(PKG_CONFIG) \
 		$(foreach library,$(LIBRARIES),-l$(library))
 LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
 
+# Uncomment to enable quiet compilation
+Q = @
 
-Uncomment to enable quiet compilation
-# Q = @
+EXEC := dqn
+SRC_FOLDER := ./src
+SRC_OBJECTS := $(patsubst %.cpp, %.o, $(wildcard $(SRC_FOLDER)/*.cpp))
 
 all: $(EXEC)
 
-$(EXEC): $(EXEC).o
+$(executable) : $(objects) $(headers)
+	g++ $(objects) -o $@
+%.o : %.cpp $(headers)
+	g++ -c $< -o $@
+
+$(EXEC): $(SRC_OBJECTS)
 	$(Q) g++ $< -o $@ $(LINKFLAGS) -l$(PROJECT) $(LDFLAGS) \
 		-Wl,-rpath,$(CAFFE_LIB) 
 	
-$(EXEC).o : $(EXEC).cpp
+%.o : %.cpp
 	$(Q) g++ $< $(CXXFLAGS) -c -o $@
 	
 clean:
-	rm $(EXEC).o $(EXEC)
+	rm $(EXEC)
+	rm $(SRC_OBJECTS)
+
