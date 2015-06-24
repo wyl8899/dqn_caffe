@@ -41,21 +41,18 @@ LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
 Q = @
 
 EXEC := dqn
-SRC_FOLDER := ./src
-SRC_OBJECTS := $(patsubst %.cpp, %.o, $(wildcard $(SRC_FOLDER)/*.cpp))
+SRC_DIR := ./src
+SRC_OBJECTS := $(patsubst %.cpp, %.o, $(wildcard $(SRC_DIR)/*.cpp))
+INCLUDE_DIR := ./include
+HEADERS := $(wildcard $(INCLUDE_DIR)/*.h)
 
 all: $(EXEC)
-
-$(executable) : $(objects) $(headers)
-	g++ $(objects) -o $@
-%.o : %.cpp $(headers)
-	g++ -c $< -o $@
 
 $(EXEC): $(SRC_OBJECTS)
 	$(Q) g++ $< -o $@ $(LINKFLAGS) -l$(PROJECT) $(LDFLAGS) \
 		-Wl,-rpath,$(CAFFE_LIB) 
 	
-%.o : %.cpp
+%.o : %.cpp $(HEADERS)
 	$(Q) g++ $< $(CXXFLAGS) -c -o $@
 	
 clean:
