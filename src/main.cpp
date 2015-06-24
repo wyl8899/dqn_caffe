@@ -19,6 +19,106 @@ using caffe::shared_ptr;
 using caffe::Timer;
 using caffe::vector;
 
+using caffe::SGDSolver;
+using caffe::SolverParameter;
+
+template <typename Dtype>
+class CustomSolver : public SGDSolver<Dtype> {
+public:
+	explicit CustomSolver( const SolverParameter& param )
+		: SGDSolver<Dtype>( param ) {}
+	void Step( int );
+};
+
+template <typename Dtype>
+void CustomSolver<Dtype>::Step ( int iters ) {
+	vector<Blob<Dtype>*> bottom_vec;
+  const int start_iter = SGDSolver<Dtype>::iter_;
+  const int stop_iter = SGDSolver<Dtype>::iter_ + iters;
+  int average_loss = this->param_.average_loss();
+  vector<Dtype> losses;
+  Dtype smoothed_loss = 0;
+
+  while (SGDSolver<Dtype>::iter_ < stop_iter) {
+    // zero-init the params
+    for (int i = 0; i < SGDSolver<Dtype>::net_->params().size(); ++i) {
+      shared_ptr<Blob<Dtype> > blob = SGDSolver<Dtype>::net_->params()[i];
+      switch (Caffe::mode()) {
+      case Caffe::CPU:
+        caffe_set(blob->count(), static_cast<Dtype>(0),
+            blob->mutable_cpu_diff());
+        break;
+      case Caffe::GPU:
+#ifndef CPU_ONLY
+        caffe_gpu_set(blob->count(), static_cast<Dtype>(0),
+            blob->mutable_gpu_diff());
+#else
+        NO_GPU;
+#endif
+        break;
+      }
+    }
+
+    if (SGDSolver<Dtype>::param_.test_interval() 
+				&& SGDSolver<Dtype>::iter_ % SGDSolver<Dtype>::param_.test_interval() == 0
+        && (SGDSolver<Dtype>::iter_ > 0 || SGDSolver<Dtype>::param_.test_initialization())) {
+      SGDSolver<Dtype>::TestAll();
+    }
+
+    const bool display = SGDSolver<Dtype>::param_.display() 
+			&& SGDSolver<Dtype>::iter_ % SGDSolver<Dtype>::param_.display() == 0;
+    SGDSolver<Dtype>::net_->set_debug_info(display && SGDSolver<Dtype>::param_.debug_info());
+    // accumulate the loss and gradient
+    Dtype loss = 0;
+    for (int i = 0; i < SGDSolver<Dtype>::param_.iter_size(); ++i) {
+      loss += SGDSolver<Dtype>::net_->ForwardBackward(bottom_vec);
+    }
+    loss /= SGDSolver<Dtype>::param_.iter_size();
+    // average the loss across iterations for smoothed reporting
+    if (losses.size() < average_loss) {
+      losses.push_back(loss);
+      int size = losses.size();
+      smoothed_loss = (smoothed_loss * (size - 1) + loss) / size;
+    } else {
+      int idx = (SGDSolver<Dtype>::iter_ - start_iter) % average_loss;
+      smoothed_loss += (loss - losses[idx]) / average_loss;
+      losses[idx] = loss;
+    }
+    if (display) {
+      LOG(INFO) << "Iteration " << SGDSolver<Dtype>::iter_ << ", loss = " << smoothed_loss;
+      const vector<Blob<Dtype>*>& result = SGDSolver<Dtype>::net_->output_blobs();
+      int score_index = 0;
+      for (int j = 0; j < result.size(); ++j) {
+        const Dtype* result_vec = result[j]->cpu_data();
+        const string& output_name =
+            SGDSolver<Dtype>::net_->blob_names()[SGDSolver<Dtype>::net_->output_blob_indices()[j]];
+        const Dtype loss_weight =
+            SGDSolver<Dtype>::net_->blob_loss_weights()[SGDSolver<Dtype>::net_->output_blob_indices()[j]];
+        for (int k = 0; k < result[j]->count(); ++k) {
+          ostringstream loss_msg_stream;
+          if (loss_weight) {
+            loss_msg_stream << " (* " << loss_weight
+                            << " = " << loss_weight * result_vec[k] << " loss)";
+          }
+          LOG(INFO) << "    Train net output #"
+              << score_index++ << ": " << output_name << " = "
+              << result_vec[k] << loss_msg_stream.str();
+        }
+      }
+    }
+    SGDSolver<Dtype>::ApplyUpdate();
+
+    // Increment the internal iter_ counter -- its value should always indicate
+    // the number of times the weights have been updated.
+    ++SGDSolver<Dtype>::iter_;
+
+    // Save a snapshot if needed.
+    if (SGDSolver<Dtype>::param_.snapshot() 
+				&& SGDSolver<Dtype>::iter_ % SGDSolver<Dtype>::param_.snapshot() == 0) {
+      SGDSolver<Dtype>::Snapshot();
+    }
+  }
+}
 
 DEFINE_int32(gpu, -1,
     "Run in GPU mode on given device ID.");
@@ -78,8 +178,9 @@ int main(int argc, char** argv) {
   }
 
   LOG(INFO) << "Starting Optimization";
+
   shared_ptr<caffe::Solver<float> >
-    solver(caffe::GetSolver<float>(solver_param));
+    solver(new CustomSolver<float>(solver_param));
 
   if (FLAGS_snapshot.size()) {
     LOG(INFO) << "Resuming from " << FLAGS_snapshot;
