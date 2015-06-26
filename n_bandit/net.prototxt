@@ -6,26 +6,41 @@ input_shape {
   dim: 1
   dim: 1
 }
+input: "reward"
+input_shape {
+  dim: 1
+  dim: 1
+  dim: 1
+  dim: 1
+}
 layer {
   name: "ip"
   type: "InnerProduct"
-  botoom: "dummy"
+  bottom: "dummy"
   top: "pred"
   param {
     lr_mult: 1
   }
-  param {
-    lr_mult: 2
-  }
   inner_product_param {
-    num_output: 10
+    num_output: 1
     bias_term: false
+    weight_filler {
+    	type: "constant"
+    	value: 0
+    }
   }
 }
 layer {
+  name: "decision"
+  type: "ArgMax"
+  bottom: "pred"
+  top: "decision"
+}
+layer {
   name: "loss"
-  type: "EucideanLoss"
+  type: "EuclideanLoss"
   bottom: "pred"
   bottom: "reward"
   top: "loss"
 }
+

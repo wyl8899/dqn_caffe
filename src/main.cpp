@@ -20,20 +20,33 @@ using caffe::vector;
 
 using caffe::SGDSolver;
 using caffe::SolverParameter;
+using caffe::caffe_set;
 
 template <typename Dtype>
 class CustomSolver : public SGDSolver<Dtype> {
 private:
-	typedef SGDSolver<Dtype> super;
+  typedef SGDSolver<Dtype> super;
 public:
-	explicit CustomSolver( const SolverParameter& param )
-		: super( param ) {}
-	void Step( int );
+  explicit CustomSolver( const SolverParameter& param )
+    : super( param ) {}
+  void Step( int );
+  void GetInfo() {
+  }
+  void FeedState() {
+    const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
+    Dtype* data = inputs[0]->mutable_cpu_data();
+    *data = static_cast<Dtype>(1);
+  }
+  void FeedReward() {
+    const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
+    Dtype* data = inputs[1]->mutable_cpu_data();
+    // TODO : See doc
+  }
 };
 
 template <typename Dtype>
 void CustomSolver<Dtype>::Step ( int iters ) {
-	vector<Blob<Dtype>*> bottom_vec;
+  vector<Blob<Dtype>*> bottom_vec;
   const int start_iter = super::iter_;
   const int stop_iter = super::iter_ + iters;
   int average_loss = this->param_.average_loss();
@@ -59,15 +72,18 @@ void CustomSolver<Dtype>::Step ( int iters ) {
         break;
       }
     }
-
+    
+    // Feed
+    FeedState();
+    
     if (super::param_.test_interval() 
-				&& super::iter_ % super::param_.test_interval() == 0
+        && super::iter_ % super::param_.test_interval() == 0
         && (super::iter_ > 0 || super::param_.test_initialization())) {
       super::TestAll();
     }
 
     const bool display = super::param_.display() 
-			&& super::iter_ % super::param_.display() == 0;
+      && super::iter_ % super::param_.display() == 0;
     super::net_->set_debug_info(display && super::param_.debug_info());
     // accumulate the loss and gradient
     Dtype loss = 0;
@@ -106,6 +122,16 @@ void CustomSolver<Dtype>::Step ( int iters ) {
               << result_vec[k] << loss_msg_stream.str();
         }
       }
+      /*LOG(INFO) << "# of input: " << super::net_->num_inputs();
+      const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
+      for ( int i = 0; i < inputs.size(); ++i ) {
+        const Blob<Dtype> * blob = inputs[i];
+        const string & blob_name =
+            super::net_->blob_names()[super::net_->input_blob_indices()[i]];
+        LOG(INFO) << " Train net input #"
+            << i << ": " << blob_name << " has size: " << blob->count()
+            << ", value: " << *blob->cpu_data() << endl;
+      }*/
     }
     super::ApplyUpdate();
 
@@ -115,7 +141,7 @@ void CustomSolver<Dtype>::Step ( int iters ) {
 
     // Save a snapshot if needed.
     if (super::param_.snapshot() 
-				&& super::iter_ % super::param_.snapshot() == 0) {
+        && super::iter_ % super::param_.snapshot() == 0) {
       super::Snapshot();
     }
   }

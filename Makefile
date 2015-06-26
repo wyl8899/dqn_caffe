@@ -55,6 +55,9 @@ $(EXEC): $(SRC_OBJECTS)
 %.o : %.cpp $(HEADERS)
 	$(Q) g++ $< $(CXXFLAGS) -c -o $@
 	
+test: all
+	./dqn --solver=n_bandit/solver.prototxt
+
 clean:
 	rm $(EXEC)
 	rm $(SRC_OBJECTS)
