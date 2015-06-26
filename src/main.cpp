@@ -1,6 +1,5 @@
 #include <ale_interface.hpp>
 
-// ====================
 #include <glog/logging.h>
 
 #include <cstring>
@@ -24,25 +23,27 @@ using caffe::SolverParameter;
 
 template <typename Dtype>
 class CustomSolver : public SGDSolver<Dtype> {
+private:
+	typedef SGDSolver<Dtype> super;
 public:
 	explicit CustomSolver( const SolverParameter& param )
-		: SGDSolver<Dtype>( param ) {}
+		: super( param ) {}
 	void Step( int );
 };
 
 template <typename Dtype>
 void CustomSolver<Dtype>::Step ( int iters ) {
 	vector<Blob<Dtype>*> bottom_vec;
-  const int start_iter = SGDSolver<Dtype>::iter_;
-  const int stop_iter = SGDSolver<Dtype>::iter_ + iters;
+  const int start_iter = super::iter_;
+  const int stop_iter = super::iter_ + iters;
   int average_loss = this->param_.average_loss();
   vector<Dtype> losses;
   Dtype smoothed_loss = 0;
 
-  while (SGDSolver<Dtype>::iter_ < stop_iter) {
+  while (super::iter_ < stop_iter) {
     // zero-init the params
-    for (int i = 0; i < SGDSolver<Dtype>::net_->params().size(); ++i) {
-      shared_ptr<Blob<Dtype> > blob = SGDSolver<Dtype>::net_->params()[i];
+    for (int i = 0; i < super::net_->params().size(); ++i) {
+      shared_ptr<Blob<Dtype> > blob = super::net_->params()[i];
       switch (Caffe::mode()) {
       case Caffe::CPU:
         caffe_set(blob->count(), static_cast<Dtype>(0),
@@ -59,41 +60,41 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       }
     }
 
-    if (SGDSolver<Dtype>::param_.test_interval() 
-				&& SGDSolver<Dtype>::iter_ % SGDSolver<Dtype>::param_.test_interval() == 0
-        && (SGDSolver<Dtype>::iter_ > 0 || SGDSolver<Dtype>::param_.test_initialization())) {
-      SGDSolver<Dtype>::TestAll();
+    if (super::param_.test_interval() 
+				&& super::iter_ % super::param_.test_interval() == 0
+        && (super::iter_ > 0 || super::param_.test_initialization())) {
+      super::TestAll();
     }
 
-    const bool display = SGDSolver<Dtype>::param_.display() 
-			&& SGDSolver<Dtype>::iter_ % SGDSolver<Dtype>::param_.display() == 0;
-    SGDSolver<Dtype>::net_->set_debug_info(display && SGDSolver<Dtype>::param_.debug_info());
+    const bool display = super::param_.display() 
+			&& super::iter_ % super::param_.display() == 0;
+    super::net_->set_debug_info(display && super::param_.debug_info());
     // accumulate the loss and gradient
     Dtype loss = 0;
-    for (int i = 0; i < SGDSolver<Dtype>::param_.iter_size(); ++i) {
-      loss += SGDSolver<Dtype>::net_->ForwardBackward(bottom_vec);
+    for (int i = 0; i < super::param_.iter_size(); ++i) {
+      loss += super::net_->ForwardBackward(bottom_vec);
     }
-    loss /= SGDSolver<Dtype>::param_.iter_size();
+    loss /= super::param_.iter_size();
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {
       losses.push_back(loss);
       int size = losses.size();
       smoothed_loss = (smoothed_loss * (size - 1) + loss) / size;
     } else {
-      int idx = (SGDSolver<Dtype>::iter_ - start_iter) % average_loss;
+      int idx = (super::iter_ - start_iter) % average_loss;
       smoothed_loss += (loss - losses[idx]) / average_loss;
       losses[idx] = loss;
     }
     if (display) {
-      LOG(INFO) << "Iteration " << SGDSolver<Dtype>::iter_ << ", loss = " << smoothed_loss;
-      const vector<Blob<Dtype>*>& result = SGDSolver<Dtype>::net_->output_blobs();
+      LOG(INFO) << "Iteration " << super::iter_ << ", loss = " << smoothed_loss;
+      const vector<Blob<Dtype>*>& result = super::net_->output_blobs();
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
         const Dtype* result_vec = result[j]->cpu_data();
         const string& output_name =
-            SGDSolver<Dtype>::net_->blob_names()[SGDSolver<Dtype>::net_->output_blob_indices()[j]];
+            super::net_->blob_names()[super::net_->output_blob_indices()[j]];
         const Dtype loss_weight =
-            SGDSolver<Dtype>::net_->blob_loss_weights()[SGDSolver<Dtype>::net_->output_blob_indices()[j]];
+            super::net_->blob_loss_weights()[super::net_->output_blob_indices()[j]];
         for (int k = 0; k < result[j]->count(); ++k) {
           ostringstream loss_msg_stream;
           if (loss_weight) {
@@ -106,19 +107,21 @@ void CustomSolver<Dtype>::Step ( int iters ) {
         }
       }
     }
-    SGDSolver<Dtype>::ApplyUpdate();
+    super::ApplyUpdate();
 
     // Increment the internal iter_ counter -- its value should always indicate
     // the number of times the weights have been updated.
-    ++SGDSolver<Dtype>::iter_;
+    ++super::iter_;
 
     // Save a snapshot if needed.
-    if (SGDSolver<Dtype>::param_.snapshot() 
-				&& SGDSolver<Dtype>::iter_ % SGDSolver<Dtype>::param_.snapshot() == 0) {
-      SGDSolver<Dtype>::Snapshot();
+    if (super::param_.snapshot() 
+				&& super::iter_ % super::param_.snapshot() == 0) {
+      super::Snapshot();
     }
   }
 }
+
+// =====================================================================
 
 DEFINE_int32(gpu, -1,
     "Run in GPU mode on given device ID.");
@@ -147,6 +150,8 @@ void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
     }
   }
 }
+
+// =========================================================================
 
 int main(int argc, char** argv) {
   // Print output to stderr (while still logging).
@@ -195,6 +200,8 @@ int main(int argc, char** argv) {
   return 0;
 }
 
+// ==================================================================
+
 #ifdef __USE_SDL
   #include <SDL.h>
 #endif
@@ -239,4 +246,3 @@ int ale_main(int argc, char** argv) {
 
     return 0;
 }
-
