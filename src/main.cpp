@@ -30,17 +30,47 @@ public:
   explicit CustomSolver( const SolverParameter& param )
     : super( param ) {}
   void Step( int );
-  void GetInfo() {
-  }
   void FeedState() {
     const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
     Dtype* data = inputs[0]->mutable_cpu_data();
     *data = static_cast<Dtype>(1);
   }
-  void FeedReward() {
-    const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
-    Dtype* data = inputs[1]->mutable_cpu_data();
-    // TODO : See doc
+  int GetAction() {
+    if ( EpsilonGreedy( 0.1 ) ) {
+      LOG(INFO) << "Choosing action by random...";
+      return rand() % 3;
+    } else {
+      LOG(INFO) << "Choosing action by net output...";
+      Blob<Dtype>* actionBlob = super::net_->output_blobs()[0];
+      return actionBlob->cpu_data()[0];
+    }
+  }
+  float ObserveReward( int action ) {
+    static const int N = 3;
+    static const float R[N] = { 1.0, 2.3, 1.6 };
+    float reward;
+    caffe::caffe_rng_gaussian(1, R[action], 0.5f, &reward);
+    //reward = R[action];
+    LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward; 
+    return reward;
+  }
+  bool EpsilonGreedy( float epsilon ) {
+    CHECK_LE(0, epsilon);
+    CHECK_LE(epsilon, 1);
+    float r;
+    caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
+    return r < epsilon;
+  }
+  void FeedReward( int action, float reward ) {
+    const shared_ptr<Blob<Dtype> > rewardBlob = super::net_->blob_by_name("reward");
+    const shared_ptr<Blob<Dtype> > predBlob = super::net_->blob_by_name("pred");
+    //LOG(INFO) << "rewardBlob : " << rewardBlob->shape_string();
+    //LOG(INFO) << "predBlob : " << predBlob->shape_string();
+    const Dtype* pred = predBlob->cpu_data();
+    LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
+    rewardBlob->CopyFrom(*predBlob, false, true);
+    Dtype* rewardData = rewardBlob->mutable_cpu_data();
+    rewardData[rewardBlob->offset(0, action, 0, 0)] = static_cast<Dtype>(reward);
   }
 };
 
@@ -72,10 +102,6 @@ void CustomSolver<Dtype>::Step ( int iters ) {
         break;
       }
     }
-    
-    // Feed
-    FeedState();
-    
     if (super::param_.test_interval() 
         && super::iter_ % super::param_.test_interval() == 0
         && (super::iter_ > 0 || super::param_.test_initialization())) {
@@ -88,7 +114,12 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     // accumulate the loss and gradient
     Dtype loss = 0;
     for (int i = 0; i < super::param_.iter_size(); ++i) {
-      loss += super::net_->ForwardBackward(bottom_vec);
+      FeedState();
+      loss += super::net_->ForwardTo(1);
+      int action = GetAction();
+      FeedReward( action, ObserveReward( action ) );
+      loss += super::net_->ForwardFrom(2);
+      super::net_->Backward();
     }
     loss /= super::param_.iter_size();
     // average the loss across iterations for smoothed reporting
@@ -210,7 +241,8 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Starting Optimization";
 
-  shared_ptr<caffe::Solver<float> >
+  // Use our modified solver
+  shared_ptr<CustomSolver<float> >
     solver(new CustomSolver<float>(solver_param));
 
   if (FLAGS_snapshot.size()) {

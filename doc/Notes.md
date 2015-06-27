@@ -20,7 +20,7 @@ Caffe的框架是给supervised learning准备的，要实现unsupervised的reinf
 
 # 一个测试
 
-我们用简化的n-Bandit问题来测试我们的想法。在这个简化的问题中，我们的Agent将重复不断的被要求从n个选项中选择一个，然后得到一定的Reward。选择第i个选项得到的Reward是仅和i有关的常数（而不是通常采用的正态分布）。
+我们用简化的n-Bandit问题来测试我们的想法。在这个简化的问题中，我们的Agent将重复不断的被要求从n个选项中选择一个，然后得到一定的Reward。选择第i个选项得到的Reward是期望为仅和i有关的常数，方差为定值的正态分布。
 
 ## 网络
 
@@ -28,9 +28,25 @@ Agent所需要做的其实就是在为每个选项做一个估价，因此网络
 
 ## 学习
 
-激动人心的拆轮子的时候到了。我们实际需要实现的学习策略比较麻烦（见下文RMSProp节），但作为简单的测试，我们考虑直接修改SGDSolver的代码来使用。具体说来，实际上需要修改的目前看起来只有Step函数，观察SGDSolver的定义，它现在就已经是一个基类了，我们可以放心的继承下来，然后修改Step函数的行为。非常不幸的是我们发现caffe::Solver::Step竟然不是虚函数，只好强行改成虚函数，重新编译caffe了。
+激动人心的拆轮子的时候到了。我们实际需要实现的学习策略比较麻烦（见下文RMSProp节），但作为简单的测试，我们考虑直接修改SGDSolver的代码来使用。具体说来，实际上需要修改的目前看起来只有Step函数，观察SGDSolver的定义，它现在就已经是一个基类了，我们可以放心的继承下来，然后修改Step函数的行为。非常不幸的是我们发现caffe::Solver::Step竟然不是虚函数，好吧那只好在创建solver实例的时候直接创建我们的自定义的CustomSolver的指针而不是基类指针了。
 
-新的Step函数当中，我们在每步迭代当中清空各blob的diff之后加入塞数据的代码。具体来说，我们通过`input_blobs()`获取输入数据的blob们，然后用`mutable_cpu_data`获得数据的指针，然后直接像数组一样往里填东西；多维数组的偏移量由`Blob#offset`辅助函数来计算。
+新的Step函数当中，我们在每步迭代当中加入塞数据的代码。具体来说，我们通过`input_blobs()`获取输入数据的blob们，然后用`mutable_cpu_data`获得数据的指针，然后直接像数组一样往里填东西；多维数组的偏移量由`Blob#offset`辅助函数来计算。
+
+### 基础实现
+
+1. 塞入IP层的常数1，Forward到EuclideanLoss之前
+
+2. 从ArgMax层的输出拿到网络目前判断的最优选项（如果EpsilonGreedy策略决定不进行Exploration）
+
+3. 观测结果，将IP层输出拷贝到Reward输入向量中，然后把对应位置的预测值修改为观测值
+
+4. 此时进行最后一层（也就是Loss层）的Forward
+
+5. Backward
+
+上述的基础实现已经完成。在实际测试中发现收敛不是非常理想，可能是momentum的结果。
+
+下一步我们将考察Backward和ApplyUpdate（尤其是SGDSolver当中）的行为，为Experience replay的实现的做准备。
 
 # 更多的细节
 

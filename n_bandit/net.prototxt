@@ -9,7 +9,7 @@ input_shape {
 input: "reward"
 input_shape {
   dim: 1
-  dim: 1
+  dim: 3
   dim: 1
   dim: 1
 }
@@ -19,10 +19,10 @@ layer {
   bottom: "dummy"
   top: "pred"
   param {
-    lr_mult: 1
+    lr_mult: 2
   }
   inner_product_param {
-    num_output: 1
+    num_output: 3
     bias_term: false
     weight_filler {
     	type: "constant"
@@ -31,10 +31,10 @@ layer {
   }
 }
 layer {
-  name: "decision"
+  name: "action"
   type: "ArgMax"
   bottom: "pred"
-  top: "decision"
+  top: "action"
 }
 layer {
   name: "loss"
