@@ -37,14 +37,13 @@ LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir)) $(PKG_CONFIG) \
 		$(foreach library,$(LIBRARIES),-l$(library))
 LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
 
-# Uncomment to enable quiet compilation
+# comment to disable quiet compilation
 Q = @
 
 EXEC := dqn
 SRC_DIR := ./src
 SRC_OBJECTS := $(patsubst %.cpp, %.o, $(wildcard $(SRC_DIR)/*.cpp))
-INCLUDE_DIR := ./include
-HEADERS := $(wildcard $(INCLUDE_DIR)/*.h)
+HEADERS := $(wildcard $(SRC_DIR)/*.h)
 
 all: $(EXEC)
 
