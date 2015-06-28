@@ -51,8 +51,6 @@ public:
     caffe::caffe_rng_gaussian( 1, R[action], 0.5f, &reward );
     static float dummy[1] = { 1.0 };
     return shared_ptr<State<Dtype> >( new State<Dtype>( dummy, 1 ) );
-    //reward = R[action];
-    //LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward; 
   }
 };
 
@@ -110,7 +108,9 @@ class CustomSolver : public SGDSolver<Dtype> {
 private:
   typedef SGDSolver<Dtype> super;
   enum {
-    HISTORY_SIZE = 100
+    REPLAY_START_SIZE = 5000,
+    HISTORY_SIZE = 100000,
+    LOSS_LAYER_ID = 3
   };
 public:
   explicit CustomSolver( const SolverParameter& param )
@@ -146,7 +146,7 @@ private:
     CHECK_LE(epsilon, 1);
     float r;
     caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
-    if ( r < epsilon ) {
+    if ( r < epsilon || this->iter_ <= REPLAY_START_SIZE ) {
       return rand() % 3;
     } else {
       return GetActionFromNet();
@@ -165,24 +165,23 @@ private:
   
   void PlayStep( shared_ptr<State<Dtype> > state ) {
     static int actionCount[3] = {0, 0, 0};
-    const int lossLayerID = 3;
     state->Feed( this->net_->input_blobs()[0] );
-    this->net_->ForwardTo( lossLayerID - 1 );
+    this->net_->ForwardTo( LOSS_LAYER_ID - 1 );
     int action = GetAction( 0.1 ); // Epsilon-Greedy with epsilon = 0.1
     float reward;
     shared_ptr<State<Dtype> > state_1 = environment_.Observe( action, reward );
+    //LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward;
     history_.AddExperience( Transition<Dtype>(state, action, reward, state_1 ) );
     actionCount[action]++;
   }
   
   float TrainStep() {
-    const int lossLayerID = 3;
+    const int LOSS_LAYER_ID = 3;
     Transition<Dtype> trans = history_.Sample();
     trans.FeedState( 0, this->net_->input_blobs()[0] );
-    this->net_->ForwardTo( lossLayerID - 1 );
-    int action = GetActionFromNet();
-    FeedReward( action, trans.reward );
-    float loss = this->net_->ForwardFrom( lossLayerID );
+    this->net_->ForwardTo( LOSS_LAYER_ID - 1 );
+    FeedReward( trans.action, trans.reward );
+    float loss = this->net_->ForwardFrom( LOSS_LAYER_ID );
     this->net_->Backward();
     return loss;
   }
@@ -226,9 +225,10 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     PlayStep( shared_ptr<State<Dtype> >( new State<Dtype>( dummy, 1 ) ) );
     
     Dtype loss = 0;
-    for (int i = 0; i < this->param_.iter_size(); ++i) {
-      loss += TrainStep();
-    }
+    if ( this->iter_ > REPLAY_START_SIZE )
+      for (int i = 0; i < this->param_.iter_size(); ++i) {
+        loss += TrainStep();
+      }
     loss /= this->param_.iter_size();
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {

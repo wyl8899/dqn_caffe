@@ -13,10 +13,10 @@ stepsize: 10000  # drop the learning rate every 100K iterations
 
 display: 1000
 
-iter_size: 10
+iter_size: 32
 
 # The maximum number of iterations
-max_iter: 30000
+max_iter: 35000
 
 # Do not snapshot
 snapshot_after_train: false
