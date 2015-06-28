@@ -24,46 +24,54 @@ using caffe::caffe_set;
 
 template <typename Dtype>
 struct Scene {
-	Dtype* data;
-	int size;
-	Scene( Dtype* d, int n ) {
-		CHECK_GT( n, 0 );
-		data = new Dtype[n];
-		caffe::caffe_copy( n, d, data );
-		size = n;
-	}
-	~Scene() {
-		delete [] data;
-	}
-	void Feed( Blob<Dtype>* blob ) {
-		CHECK_EQ( size, blob->count() );
-		Dtype* blobData = blob->mutable_cpu_data();
-		caffe::caffe_copy( size, data, blobData );
-	}
-	DISABLE_COPY_AND_ASSIGN( Scene );
+  Dtype* data;
+  int size;
+  Scene( Dtype* d, int n ) {
+    CHECK_GT( n, 0 );
+    data = new Dtype[n];
+    caffe::caffe_copy( n, d, data );
+    size = n;
+  }
+  ~Scene() {
+    delete [] data;
+  }
+  void Feed( Blob<Dtype>* blob ) {
+    CHECK_EQ( size, blob->count() );
+    Dtype* blobData = blob->mutable_cpu_data();
+    caffe::caffe_copy( size, data, blobData );
+  }
 };
 
 template <typename Dtype>
-struct Experience {
-	typedef Scene<Dtype> State;
-	State scene_0, scene_1;
-	int action;
-	float reward;
-	
-	Experience( State s0, int a, float r, State s1 )
-		: scene_0( s0 ), action( a ), reward( r ), scene_1( s1 ) {
-	}
-	
-	void FeedScene( int i, Blob<Dtype>* blob ) {
-		if( i == 0 )
-			scene_0.Feed( blob );
-		else if ( i == 1 )
-			scene_1.Feed( blob );
-		else
-			LOG(FATAL) << "No such scene";
-	}
+struct Transition {
+  typedef Scene<Dtype> State;
+  State scene_0, scene_1;
+  int action;
+  float reward;
+  
+  Experience( State s0, int a, float r, State s1 )
+    : scene_0( s0 ), action( a ), reward( r ), scene_1( s1 ) {
+  }
+  
+  void FeedScene( int i, Blob<Dtype>* blob ) {
+    if( i == 0 )
+      scene_0.Feed( blob );
+    else if ( i == 1 )
+      scene_1.Feed( blob );
+    else
+      LOG(FATAL) << "No such scene";
+  }
 };
-		
+
+template <typename Dtype>
+class ExpHistory {
+public:
+  typedef Transition<Dtype> Exp;
+  void Add( Exp & 
+private:
+  vector<Exp> history_;
+  int currentIndex_;
+};
 
 template <typename Dtype>
 class CustomSolver : public SGDSolver<Dtype> {
@@ -72,15 +80,15 @@ private:
 public:
   explicit CustomSolver( const SolverParameter& param )
     : super( param ) {
-		const vector<string> & layers = this->net_->layer_names();
-		for ( int i = 0; i < layers.size(); ++i ) {
-			LOG(INFO) << "Layer #" << i << ": " << layers[i];
-		}
-		const vector<string> & blobs = this->net_->blob_names();
-		for ( int i = 0; i < blobs.size(); ++i ) {
-			LOG(INFO) << "Blob #" << i << ": " << blobs[i];
-		}
-	}
+    const vector<string> & layers = this->net_->layer_names();
+    for ( int i = 0; i < layers.size(); ++i ) {
+      LOG(INFO) << "Layer #" << i << ": " << layers[i];
+    }
+    const vector<string> & blobs = this->net_->blob_names();
+    for ( int i = 0; i < blobs.size(); ++i ) {
+      LOG(INFO) << "Blob #" << i << ": " << blobs[i];
+    }
+  }
   void Step( int );
   void FeedState() {
     const vector<Blob<Dtype>*> & inputs = this->net_->input_blobs();
@@ -93,10 +101,6 @@ public:
     } else {
       Blob<Dtype>* actionBlob = this->net_->output_blobs()[0];
       int action = actionBlob->cpu_data()[0];
-      const Dtype* pred = this->net_->blob_by_name("pred")->cpu_data();
-      for ( int i = 0; i < 2; ++i ) {
-				CHECK_LE(pred[i], pred[action]);
-			}
       return action;
     }
   }
@@ -126,7 +130,7 @@ public:
     rewardData[rewardBlob->offset(0, action, 0, 0)] = static_cast<Dtype>(reward);
   }
 private:
-	
+  
 };
 
 template <typename Dtype>
@@ -165,9 +169,9 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     
     static int actionCount[3] = {0, 0, 0};
     
-		Dtype loss = 0;
+    Dtype loss = 0;
     for (int i = 0; i < this->param_.iter_size(); ++i) {
-			const int lossLayerID = 3;
+      const int lossLayerID = 3;
       FeedState();
       loss += this->net_->ForwardTo( lossLayerID - 1 );
       int action = GetAction();
@@ -193,10 +197,10 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       const Dtype* pred = predBlob->cpu_data();
       float perc[3], sC = 0;
       for ( int i = 0; i < 3; ++i )
-				sC += actionCount[i];
+        sC += actionCount[i];
       for ( int i = 0; i < 3; ++i )
-				perc[i] = actionCount[i] / sC * 100;
-			LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
+        perc[i] = actionCount[i] / sC * 100;
+      LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
       LOG(INFO) << "Percentage : " << perc[0] << ", " << perc[1] << ", " << perc[2];
     }
     this->ApplyUpdate();
