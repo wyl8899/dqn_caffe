@@ -23,43 +23,58 @@ using caffe::SolverParameter;
 using caffe::caffe_set;
 
 template <typename Dtype>
-struct Scene {
+struct State {
   Dtype* data;
   int size;
-  Scene( Dtype* d, int n ) {
+  State( Dtype* d, int n ) {
     CHECK_GT( n, 0 );
     data = new Dtype[n];
     caffe::caffe_copy( n, d, data );
     size = n;
-  }
-  ~Scene() {
-    delete [] data;
   }
   void Feed( Blob<Dtype>* blob ) {
     CHECK_EQ( size, blob->count() );
     Dtype* blobData = blob->mutable_cpu_data();
     caffe::caffe_copy( size, data, blobData );
   }
+  DISABLE_COPY_AND_ASSIGN( State );
+};
+
+template <typename Dtype>
+class Environment {
+public:
+  Environment() {
+  }
+  shared_ptr<State<Dtype> > Observe( int action, float & reward ) {
+    static const int N = 3;
+    static const float R[N] = { 1.0, 2.3, 1.6 };
+    caffe::caffe_rng_gaussian( 1, R[action], 0.5f, &reward );
+    static float dummy[1] = { 1.0 };
+    return shared_ptr<State<Dtype> >( new State<Dtype>( dummy, 1 ) );
+    //reward = R[action];
+    //LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward; 
+  }
 };
 
 template <typename Dtype>
 struct Transition {
-  typedef Scene<Dtype> State;
-  State scene_0, scene_1;
+  typedef shared_ptr<State<Dtype> > StatePtr;
+  StatePtr state_0;
   int action;
   float reward;
+  StatePtr state_1;
   
-  Experience( State s0, int a, float r, State s1 )
-    : scene_0( s0 ), action( a ), reward( r ), scene_1( s1 ) {
+  Transition( StatePtr s0, int a, float r, StatePtr s1 )
+    : state_0( s0 ), action( a ), reward( r ), state_1( s1 ) {
   }
   
-  void FeedScene( int i, Blob<Dtype>* blob ) {
+  void FeedState( int i, Blob<Dtype>* blob ) {
     if( i == 0 )
-      scene_0.Feed( blob );
+      state_0->Feed( blob );
     else if ( i == 1 )
-      scene_1.Feed( blob );
+      state_1->Feed( blob );
     else
-      LOG(FATAL) << "No such scene";
+      LOG(FATAL) << "No such state";
   }
 };
 
@@ -67,19 +82,39 @@ template <typename Dtype>
 class ExpHistory {
 public:
   typedef Transition<Dtype> Exp;
-  void Add( Exp & 
+  ExpHistory ( int n ) : capacity_( n ) {
+  }
+  void AddExperience( Exp exp ) {
+    int cur;
+    if ( history_.size() < capacity_ ) {
+      history_.push_back( exp );
+      cur = history_.size();
+    } else {
+      cur = currentIndex_++;
+      if ( cur == capacity_ )
+        cur = 0;
+      history_[cur] = exp;
+    }
+    currentIndex_ = cur;
+  }
+  Exp & Sample() {
+    return history_[rand() % history_.size()];
+  }
 private:
   vector<Exp> history_;
-  int currentIndex_;
+  int capacity_, currentIndex_;
 };
 
 template <typename Dtype>
 class CustomSolver : public SGDSolver<Dtype> {
 private:
   typedef SGDSolver<Dtype> super;
+  enum {
+    HISTORY_SIZE = 100
+  };
 public:
   explicit CustomSolver( const SolverParameter& param )
-    : super( param ) {
+    : super( param ), history_( HISTORY_SIZE ) {
     const vector<string> & layers = this->net_->layer_names();
     for ( int i = 0; i < layers.size(); ++i ) {
       LOG(INFO) << "Layer #" << i << ": " << layers[i];
@@ -90,36 +125,34 @@ public:
     }
   }
   void Step( int );
+private:
+  ExpHistory<Dtype> history_;
+  Environment<Dtype> environment_;
+  
   void FeedState() {
     const vector<Blob<Dtype>*> & inputs = this->net_->input_blobs();
     Dtype* data = inputs[0]->mutable_cpu_data();
     *data = static_cast<Dtype>(1);
   }
-  int GetAction() {
-    if ( EpsilonGreedy( 0.1 ) ) {
-      return rand() % 3;
-    } else {
-      Blob<Dtype>* actionBlob = this->net_->output_blobs()[0];
-      int action = actionBlob->cpu_data()[0];
-      return action;
-    }
+  
+  int GetActionFromNet() {
+    Blob<Dtype>* actionBlob = this->net_->output_blobs()[0];
+    int action = actionBlob->cpu_data()[0];
+    return action;
   }
-  float ObserveReward( int action ) {
-    static const int N = 3;
-    static const float R[N] = { 1.0, 2.3, 1.6 };
-    float reward;
-    caffe::caffe_rng_gaussian(1, R[action], 0.5f, &reward);
-    //reward = R[action];
-    //LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward; 
-    return reward;
-  }
-  bool EpsilonGreedy( float epsilon ) {
+  
+  int GetAction( float epsilon ) {
     CHECK_LE(0, epsilon);
     CHECK_LE(epsilon, 1);
     float r;
     caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
-    return r < epsilon;
+    if ( r < epsilon ) {
+      return rand() % 3;
+    } else {
+      return GetActionFromNet();
+    }
   }
+  
   void FeedReward( int action, float reward ) {
     const shared_ptr<Blob<Dtype> > rewardBlob = this->net_->blob_by_name("reward");
     const shared_ptr<Blob<Dtype> > predBlob = this->net_->blob_by_name("pred");
@@ -129,8 +162,30 @@ public:
     Dtype* rewardData = rewardBlob->mutable_cpu_data();
     rewardData[rewardBlob->offset(0, action, 0, 0)] = static_cast<Dtype>(reward);
   }
-private:
   
+  void PlayStep( shared_ptr<State<Dtype> > state ) {
+    static int actionCount[3] = {0, 0, 0};
+    const int lossLayerID = 3;
+    state->Feed( this->net_->input_blobs()[0] );
+    this->net_->ForwardTo( lossLayerID - 1 );
+    int action = GetAction( 0.1 ); // Epsilon-Greedy with epsilon = 0.1
+    float reward;
+    shared_ptr<State<Dtype> > state_1 = environment_.Observe( action, reward );
+    history_.AddExperience( Transition<Dtype>(state, action, reward, state_1 ) );
+    actionCount[action]++;
+  }
+  
+  float TrainStep() {
+    const int lossLayerID = 3;
+    Transition<Dtype> trans = history_.Sample();
+    trans.FeedState( 0, this->net_->input_blobs()[0] );
+    this->net_->ForwardTo( lossLayerID - 1 );
+    int action = GetActionFromNet();
+    FeedReward( action, trans.reward );
+    float loss = this->net_->ForwardFrom( lossLayerID );
+    this->net_->Backward();
+    return loss;
+  }
 };
 
 template <typename Dtype>
@@ -167,18 +222,12 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     this->net_->set_debug_info(display && this->param_.debug_info());
     // accumulate the loss and gradient
     
-    static int actionCount[3] = {0, 0, 0};
+    static float dummy[1] = { 1.0 };
+    PlayStep( shared_ptr<State<Dtype> >( new State<Dtype>( dummy, 1 ) ) );
     
     Dtype loss = 0;
     for (int i = 0; i < this->param_.iter_size(); ++i) {
-      const int lossLayerID = 3;
-      FeedState();
-      loss += this->net_->ForwardTo( lossLayerID - 1 );
-      int action = GetAction();
-      actionCount[action]++;
-      FeedReward( action, ObserveReward( action ) );
-      loss += this->net_->ForwardFrom( lossLayerID );
-      this->net_->Backward();
+      loss += TrainStep();
     }
     loss /= this->param_.iter_size();
     // average the loss across iterations for smoothed reporting
@@ -195,13 +244,7 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       LOG(INFO) << "Iteration " << this->iter_ << ", loss = " << smoothed_loss;
       const shared_ptr<Blob<Dtype> > predBlob = this->net_->blob_by_name("pred");
       const Dtype* pred = predBlob->cpu_data();
-      float perc[3], sC = 0;
-      for ( int i = 0; i < 3; ++i )
-        sC += actionCount[i];
-      for ( int i = 0; i < 3; ++i )
-        perc[i] = actionCount[i] / sC * 100;
       LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
-      LOG(INFO) << "Percentage : " << perc[0] << ", " << perc[1] << ", " << perc[2];
     }
     this->ApplyUpdate();
 
