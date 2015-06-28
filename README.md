@@ -1,5 +1,7 @@
 # dqn_caffe
 
+Yet another Deep Q Network implementation with caffe. 0% completed.
+
 Just for fun :)
 
 We are now trying to figure out how to adapt caffe to reinforcement learning, with experience replay and RMSProp as proposed in the [paper](http://www.cs.toronto.edu/~vmnih/docs/dqn.pdf). Simplified classical problem, the n-bandit, in reinforcement learning was used to test the current modified solver.
