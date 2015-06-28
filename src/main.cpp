@@ -23,26 +23,81 @@ using caffe::SolverParameter;
 using caffe::caffe_set;
 
 template <typename Dtype>
+struct Scene {
+	Dtype* data;
+	int size;
+	Scene( Dtype* d, int n ) {
+		CHECK_GT( n, 0 );
+		data = new Dtype[n];
+		caffe::caffe_copy( n, d, data );
+		size = n;
+	}
+	~Scene() {
+		delete [] data;
+	}
+	void Feed( Blob<Dtype>* blob ) {
+		CHECK_EQ( size, blob->count() );
+		Dtype* blobData = blob->mutable_cpu_data();
+		caffe::caffe_copy( size, data, blobData );
+	}
+	DISABLE_COPY_AND_ASSIGN( Scene );
+};
+
+template <typename Dtype>
+struct Experience {
+	typedef Scene<Dtype> State;
+	State scene_0, scene_1;
+	int action;
+	float reward;
+	
+	Experience( State s0, int a, float r, State s1 )
+		: scene_0( s0 ), action( a ), reward( r ), scene_1( s1 ) {
+	}
+	
+	void FeedScene( int i, Blob<Dtype>* blob ) {
+		if( i == 0 )
+			scene_0.Feed( blob );
+		else if ( i == 1 )
+			scene_1.Feed( blob );
+		else
+			LOG(FATAL) << "No such scene";
+	}
+};
+		
+
+template <typename Dtype>
 class CustomSolver : public SGDSolver<Dtype> {
 private:
   typedef SGDSolver<Dtype> super;
 public:
   explicit CustomSolver( const SolverParameter& param )
-    : super( param ) {}
+    : super( param ) {
+		const vector<string> & layers = this->net_->layer_names();
+		for ( int i = 0; i < layers.size(); ++i ) {
+			LOG(INFO) << "Layer #" << i << ": " << layers[i];
+		}
+		const vector<string> & blobs = this->net_->blob_names();
+		for ( int i = 0; i < blobs.size(); ++i ) {
+			LOG(INFO) << "Blob #" << i << ": " << blobs[i];
+		}
+	}
   void Step( int );
   void FeedState() {
-    const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
+    const vector<Blob<Dtype>*> & inputs = this->net_->input_blobs();
     Dtype* data = inputs[0]->mutable_cpu_data();
     *data = static_cast<Dtype>(1);
   }
   int GetAction() {
     if ( EpsilonGreedy( 0.1 ) ) {
-      LOG(INFO) << "Choosing action by random...";
       return rand() % 3;
     } else {
-      LOG(INFO) << "Choosing action by net output...";
-      Blob<Dtype>* actionBlob = super::net_->output_blobs()[0];
-      return actionBlob->cpu_data()[0];
+      Blob<Dtype>* actionBlob = this->net_->output_blobs()[0];
+      int action = actionBlob->cpu_data()[0];
+      const Dtype* pred = this->net_->blob_by_name("pred")->cpu_data();
+      for ( int i = 0; i < 2; ++i ) {
+				CHECK_LE(pred[i], pred[action]);
+			}
+      return action;
     }
   }
   float ObserveReward( int action ) {
@@ -51,7 +106,7 @@ public:
     float reward;
     caffe::caffe_rng_gaussian(1, R[action], 0.5f, &reward);
     //reward = R[action];
-    LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward; 
+    //LOG(INFO) << "Observed (action, reward) = " << action << ", " << reward; 
     return reward;
   }
   bool EpsilonGreedy( float epsilon ) {
@@ -62,31 +117,31 @@ public:
     return r < epsilon;
   }
   void FeedReward( int action, float reward ) {
-    const shared_ptr<Blob<Dtype> > rewardBlob = super::net_->blob_by_name("reward");
-    const shared_ptr<Blob<Dtype> > predBlob = super::net_->blob_by_name("pred");
-    //LOG(INFO) << "rewardBlob : " << rewardBlob->shape_string();
-    //LOG(INFO) << "predBlob : " << predBlob->shape_string();
+    const shared_ptr<Blob<Dtype> > rewardBlob = this->net_->blob_by_name("reward");
+    const shared_ptr<Blob<Dtype> > predBlob = this->net_->blob_by_name("pred");
     const Dtype* pred = predBlob->cpu_data();
-    LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
+    //LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
     rewardBlob->CopyFrom(*predBlob, false, true);
     Dtype* rewardData = rewardBlob->mutable_cpu_data();
     rewardData[rewardBlob->offset(0, action, 0, 0)] = static_cast<Dtype>(reward);
   }
+private:
+	
 };
 
 template <typename Dtype>
 void CustomSolver<Dtype>::Step ( int iters ) {
   vector<Blob<Dtype>*> bottom_vec;
-  const int start_iter = super::iter_;
-  const int stop_iter = super::iter_ + iters;
+  const int start_iter = this->iter_;
+  const int stop_iter = this->iter_ + iters;
   int average_loss = this->param_.average_loss();
   vector<Dtype> losses;
   Dtype smoothed_loss = 0;
 
-  while (super::iter_ < stop_iter) {
+  while (this->iter_ < stop_iter) {
     // zero-init the params
-    for (int i = 0; i < super::net_->params().size(); ++i) {
-      shared_ptr<Blob<Dtype> > blob = super::net_->params()[i];
+    for (int i = 0; i < this->net_->params().size(); ++i) {
+      shared_ptr<Blob<Dtype> > blob = this->net_->params()[i];
       switch (Caffe::mode()) {
       case Caffe::CPU:
         caffe_set(blob->count(), static_cast<Dtype>(0),
@@ -102,78 +157,58 @@ void CustomSolver<Dtype>::Step ( int iters ) {
         break;
       }
     }
-    if (super::param_.test_interval() 
-        && super::iter_ % super::param_.test_interval() == 0
-        && (super::iter_ > 0 || super::param_.test_initialization())) {
-      super::TestAll();
-    }
 
-    const bool display = super::param_.display() 
-      && super::iter_ % super::param_.display() == 0;
-    super::net_->set_debug_info(display && super::param_.debug_info());
+    const bool display = this->param_.display() 
+      && this->iter_ % this->param_.display() == 0;
+    this->net_->set_debug_info(display && this->param_.debug_info());
     // accumulate the loss and gradient
-    Dtype loss = 0;
-    for (int i = 0; i < super::param_.iter_size(); ++i) {
+    
+    static int actionCount[3] = {0, 0, 0};
+    
+		Dtype loss = 0;
+    for (int i = 0; i < this->param_.iter_size(); ++i) {
+			const int lossLayerID = 3;
       FeedState();
-      loss += super::net_->ForwardTo(1);
+      loss += this->net_->ForwardTo( lossLayerID - 1 );
       int action = GetAction();
+      actionCount[action]++;
       FeedReward( action, ObserveReward( action ) );
-      loss += super::net_->ForwardFrom(2);
-      super::net_->Backward();
+      loss += this->net_->ForwardFrom( lossLayerID );
+      this->net_->Backward();
     }
-    loss /= super::param_.iter_size();
+    loss /= this->param_.iter_size();
     // average the loss across iterations for smoothed reporting
     if (losses.size() < average_loss) {
       losses.push_back(loss);
       int size = losses.size();
       smoothed_loss = (smoothed_loss * (size - 1) + loss) / size;
     } else {
-      int idx = (super::iter_ - start_iter) % average_loss;
+      int idx = (this->iter_ - start_iter) % average_loss;
       smoothed_loss += (loss - losses[idx]) / average_loss;
       losses[idx] = loss;
     }
     if (display) {
-      LOG(INFO) << "Iteration " << super::iter_ << ", loss = " << smoothed_loss;
-      const vector<Blob<Dtype>*>& result = super::net_->output_blobs();
-      int score_index = 0;
-      for (int j = 0; j < result.size(); ++j) {
-        const Dtype* result_vec = result[j]->cpu_data();
-        const string& output_name =
-            super::net_->blob_names()[super::net_->output_blob_indices()[j]];
-        const Dtype loss_weight =
-            super::net_->blob_loss_weights()[super::net_->output_blob_indices()[j]];
-        for (int k = 0; k < result[j]->count(); ++k) {
-          ostringstream loss_msg_stream;
-          if (loss_weight) {
-            loss_msg_stream << " (* " << loss_weight
-                            << " = " << loss_weight * result_vec[k] << " loss)";
-          }
-          LOG(INFO) << "    Train net output #"
-              << score_index++ << ": " << output_name << " = "
-              << result_vec[k] << loss_msg_stream.str();
-        }
-      }
-      /*LOG(INFO) << "# of input: " << super::net_->num_inputs();
-      const vector<Blob<Dtype>*> & inputs = super::net_->input_blobs();
-      for ( int i = 0; i < inputs.size(); ++i ) {
-        const Blob<Dtype> * blob = inputs[i];
-        const string & blob_name =
-            super::net_->blob_names()[super::net_->input_blob_indices()[i]];
-        LOG(INFO) << " Train net input #"
-            << i << ": " << blob_name << " has size: " << blob->count()
-            << ", value: " << *blob->cpu_data() << endl;
-      }*/
+      LOG(INFO) << "Iteration " << this->iter_ << ", loss = " << smoothed_loss;
+      const shared_ptr<Blob<Dtype> > predBlob = this->net_->blob_by_name("pred");
+      const Dtype* pred = predBlob->cpu_data();
+      float perc[3], sC = 0;
+      for ( int i = 0; i < 3; ++i )
+				sC += actionCount[i];
+      for ( int i = 0; i < 3; ++i )
+				perc[i] = actionCount[i] / sC * 100;
+			LOG(INFO) << "pred = " << pred[0] << ", " << pred[1] << ", " << pred[2];
+      LOG(INFO) << "Percentage : " << perc[0] << ", " << perc[1] << ", " << perc[2];
     }
-    super::ApplyUpdate();
+    this->ApplyUpdate();
 
     // Increment the internal iter_ counter -- its value should always indicate
     // the number of times the weights have been updated.
-    ++super::iter_;
+    ++this->iter_;
 
     // Save a snapshot if needed.
-    if (super::param_.snapshot() 
-        && super::iter_ % super::param_.snapshot() == 0) {
-      super::Snapshot();
+    if (this->param_.snapshot() 
+        && this->iter_ % this->param_.snapshot() == 0) {
+      this->Snapshot();
     }
   }
 }
