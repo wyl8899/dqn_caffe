@@ -29,6 +29,11 @@ public:
     }
   }
   void Step( int );
+  
+  void SetALE( ALEInterface* ale ) {
+    environment_.SetALE( ale );
+  }
+  
 private:
   ExpHistory<Dtype> history_;
   Environment<Dtype> environment_;

@@ -55,7 +55,7 @@ $(EXEC): $(SRC_OBJECTS)
 	$(Q) g++ $< $(CXXFLAGS) -c -o $@
 	
 test: all
-	./dqn --solver=n_bandit/solver.prototxt
+	./dqn --solver=n_bandit/solver.prototxt --rom=roms/space_invaders.bin
 
 clean:
 	rm $(EXEC)

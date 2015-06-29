@@ -1,7 +1,37 @@
 #include "CommonIncludes.h"
 #include "CustomSolver.h"
 
-int main(int argc, char** argv) {
+DEFINE_int32(gpu, -1,
+    "Run in GPU mode on given device ID.");
+DEFINE_string(solver, "",
+    "The solver definition protocol buffer text file.");
+DEFINE_string(model, "",
+    "The model definition protocol buffer text file..");
+DEFINE_string(snapshot, "",
+    "Optional; the snapshot solver state to resume training.");
+DEFINE_string(weights, "",
+    "Optional; the pretrained weights to initialize finetuning. "
+    "Cannot be set simultaneously with snapshot.");
+DEFINE_int32(iterations, 50,
+    "The number of iterations to run.");
+DEFINE_string( rom, "", 
+    "The rom file of the game." ); 
+
+// Load the weights from the specified caffemodel(s) into the train and
+// test nets.
+void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
+  std::vector<std::string> model_names;
+  boost::split(model_names, model_list, boost::is_any_of(",") );
+  for (int i = 0; i < model_names.size(); ++i) {
+    LOG(INFO) << "Finetuning from " << model_names[i];
+    solver->net()->CopyTrainedLayersFrom(model_names[i]);
+    for (int j = 0; j < solver->test_nets().size(); ++j) {
+      solver->test_nets()[j]->CopyTrainedLayersFrom(model_names[i]);
+    }
+  }
+}
+
+shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
   // Print output to stderr (while still logging).
   FLAGS_alsologtostderr = 1;
   caffe::GlobalInit(&argc, &argv);
@@ -29,13 +59,27 @@ int main(int argc, char** argv) {
     LOG(INFO) << "Use CPU.";
     Caffe::set_mode(Caffe::CPU);
   }
-
-  LOG(INFO) << "Starting Optimization";
-
-  // Use our modified solver
+  
   shared_ptr<CustomSolver<float> >
     solver(new CustomSolver<float>(solver_param));
+    
+  return solver;
+}
 
+ALEInterface* ale_init() {
+  static ALEInterface ale;
+  ale.setFloat( "repeat_action_probability", 0.0 );
+  CHECK_EQ( FLAGS_rom, "roms/space_invaders.bin" );
+  ale.loadROM( FLAGS_rom );
+  return &ale;
+}
+
+int main( int argc, char** argv ) {
+  shared_ptr<CustomSolver<float> > solver = caffe_init( argc, argv );
+  ALEInterface* ale = ale_init();
+  solver->SetALE( ale );
+  
+  LOG(INFO) << "Starting Optimization";
   if (FLAGS_snapshot.size()) {
     LOG(INFO) << "Resuming from " << FLAGS_snapshot;
     solver->Solve(FLAGS_snapshot);
@@ -46,50 +90,6 @@ int main(int argc, char** argv) {
     solver->Solve();
   }
   LOG(INFO) << "Optimization Done.";
+  
   return 0;
-}
-
-#ifdef __USE_SDL
-  #include <SDL.h>
-#endif
-
-int ale_main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " rom_file" << std::endl;
-        return 1;
-    }
-
-    ALEInterface ale;
-
-    // Get & Set the desired settings
-    ale.setInt("random_seed", 123);
-    //The default is already 0.25, this is just an example
-    ale.setFloat("repeat_action_probability", 0.25);
-
-#ifdef __USE_SDL
-    ale.setBool("display_screen", true);
-    ale.setBool("sound", true);
-#endif
-
-    // Load the ROM file. (Also resets the system for new settings to
-    // take effect.)
-    ale.loadROM(argv[1]);
-
-    // Get the vector of legal actions
-    ActionVect legal_actions = ale.getLegalActionSet();
-
-    // Play 10 episodes
-    for (int episode=0; episode<10; episode++) {
-        float totalReward = 0;
-        while (!ale.game_over()) {
-            Action a = legal_actions[rand() % legal_actions.size()];
-            // Apply the action and get the resulting reward
-            float reward = ale.act(a);
-            totalReward += reward;
-        }
-        cout << "Episode " << episode << " ended with score: " << totalReward << endl;
-        ale.reset_game();
-    }
-
-    return 0;
 }

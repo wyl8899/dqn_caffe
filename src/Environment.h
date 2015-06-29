@@ -8,7 +8,14 @@ template <typename Dtype>
 class Environment {
 public:
   Environment();
+  
   shared_ptr<State<Dtype> > Observe( int action, float & reward );
+  
+  void SetALE( ALEInterface* ale ) {
+    ale_ = ale;
+  }
+private:
+  ALEInterface* ale_;
 };
 
 template <typename Dtype>
