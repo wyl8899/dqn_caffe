@@ -1,32 +1,38 @@
-name: "N_Bandit"
-input: "dummy"
+name: "DQN"
+input: "state"
 input_shape {
   dim: 1
-  dim: 1
-  dim: 1
-  dim: 1
+  dim: 4
+  dim: 84
+  dim: 84
 }
 input: "reward"
 input_shape {
   dim: 1
-  dim: 3
+  dim: 18
   dim: 1
   dim: 1
 }
 layer {
   name: "ip"
   type: "InnerProduct"
-  bottom: "dummy"
+  bottom: "state"
   top: "pred"
+  param {
+    lr_mult: 1
+  }
   param {
     lr_mult: 2
   }
   inner_product_param {
-    num_output: 3
-    bias_term: false
+    num_output: 18
+    bias_term: true
     weight_filler {
-    	type: "constant"
-    	value: 0
+    	type: "xavier"
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
     }
   }
 }
@@ -35,6 +41,9 @@ layer {
   type: "ArgMax"
   bottom: "pred"
   top: "action"
+  argmax_param {
+    out_max_val: true;
+  }
 }
 layer {
   name: "loss"

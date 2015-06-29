@@ -27,6 +27,9 @@ void State<Dtype>::Feed( Blob<Dtype>* blob ) {
   CHECK_EQ( size, blob->count() );
   Dtype* blobData = blob->mutable_cpu_data();
   caffe::caffe_copy( size, data, blobData );
+  for ( int i = 0; i < size; ++i ) {
+    CHECK_EQ( data[i], data[i] );
+  }
 }
 
 #endif // __STATE_H__

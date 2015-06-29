@@ -66,10 +66,17 @@ shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
   return solver;
 }
 
+#ifdef __USE_SDL
+  #include <SDL.h>
+#endif
+
 ALEInterface* ale_init() {
   static ALEInterface ale;
   ale.setFloat( "repeat_action_probability", 0.0 );
-  CHECK_EQ( FLAGS_rom, "roms/space_invaders.bin" );
+#ifdef __USE_SDL
+  //ale.setBool("display_screen", true);
+  //ale.setBool("sound", true);
+#endif
   ale.loadROM( FLAGS_rom );
   return &ale;
 }
