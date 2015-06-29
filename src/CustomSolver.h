@@ -42,8 +42,8 @@ public:
 private:
   enum {
     NUMBER_OF_LEGAL_ACTIONS = 18,
-    REPLAY_START_SIZE = 5000,
-    HISTORY_SIZE = 10000
+    REPLAY_START_SIZE = 50000,
+    HISTORY_SIZE = 1000000
   };
   
   ExpHistory<Dtype> history_;

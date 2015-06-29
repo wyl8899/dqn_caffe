@@ -135,9 +135,9 @@ shared_ptr<State<Dtype> > Environment<Dtype>::Observe( int action, float & rewar
   reward = 0;
   for ( int i = 0; i < ACTION_REPEAT; ++i )
     reward += ale_->act( a );
-  if ( reward > 1.0 )
+  if ( reward > 0.0 )
     reward = 1.0;
-  if ( reward < -1.0 )
+  if ( reward < 0.0 )
     reward = -1.0;
   return GetState( false );
 }
