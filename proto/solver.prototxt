@@ -1,18 +1,15 @@
-# The train/test net protocol buffer definition
 net: "proto/net.prototxt"
 
-base_lr: 0.01    
-lr_policy: "step" 
-gamma: 0.5        
+base_lr: 0.0025   
+lr_policy: "fixed"
 
-stepsize: 10000
+momentum: 0.95
 
-display: 100
+display: 1000
 
 iter_size: 32
 
 snapshot: 10000
-snapshot_prefix: "snapshot/"
 
 max_iter: 100000
 

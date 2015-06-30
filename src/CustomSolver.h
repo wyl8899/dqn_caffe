@@ -7,17 +7,18 @@
 #include "Transition.h"
 #include "ExpHistory.h"
 
+#include <cmath>
+
 #define FIND_BLOB(name) \
-  if ( blobs[i] == #name ) { \
-    name##Blob_ = this->net_->blobs()[i].get(); \
-    LOG(INFO) << "Blob " << #name << " found. "; \
-  }
+  name##Blob_ = NULL; \
+  name##Blob_ = this->net_->blob_by_name(#name).get(); \
+  CHECK( name##Blob_ );
 
 template <typename Dtype>
 class CustomSolver : public SGDSolver<Dtype> {
 public:
   explicit CustomSolver( const SolverParameter& param )
-    : SGDSolver<Dtype>( param ), history_( HISTORY_SIZE ) {
+    : SGDSolver<Dtype>( param ), expHistory_( HISTORY_SIZE ) {
     const vector<string> & layers = this->net_->layer_names();
     for ( int i = 0; i < layers.size(); ++i ) {
       LOG(INFO) << "Layer #" << i << ": " << layers[i];
@@ -27,26 +28,36 @@ public:
     const vector<string> & blobs = this->net_->blob_names();
     for ( int i = 0; i < blobs.size(); ++i ) {
       LOG(INFO) << "Blob #" << i << ": " << blobs[i];
-      FIND_BLOB(state);
-      FIND_BLOB(reward);
-      FIND_BLOB(pred);
-      FIND_BLOB(action);
+    }
+    FIND_BLOB(state);
+    FIND_BLOB(reward);
+    FIND_BLOB(pred);
+    FIND_BLOB(action);
+    
+    const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
+    sqGrad_.clear();
+    tmpGrad_.clear();
+    for (int i = 0; i < net_params.size(); ++i) {
+      const vector<int>& shape = net_params[i]->shape();
+      sqGrad_.push_back(shared_ptr<Blob<Dtype> >(new Blob<Dtype>(shape)));
+      tmpGrad_.push_back(shared_ptr<Blob<Dtype> >(new Blob<Dtype>(shape)));
     }
   }
+  
   void Step( int );
   
   void SetALE( ALEInterface* ale ) {
     environment_.SetALE( ale );
   }
   
-private:
+protected:
   enum {
     NUMBER_OF_LEGAL_ACTIONS = 18,
-    REPLAY_START_SIZE = 50000,
+    REPLAY_START_SIZE = 50,
     HISTORY_SIZE = 1000000
   };
   
-  ExpHistory<Dtype> history_;
+  ExpHistory<Dtype> expHistory_;
   Environment<Dtype> environment_;
   
   int lossLayerID_;
@@ -55,28 +66,21 @@ private:
   Blob<Dtype> *predBlob_;
   Blob<Dtype> *actionBlob_;
   
+  vector<shared_ptr<Blob<Dtype> > > sqGrad_, tmpGrad_;
+  
   void FeedState();
   int GetActionFromNet();
-  int GetAction( float epsilon );
+  inline int GetRandomAction() {
+    return rand() % NUMBER_OF_LEGAL_ACTIONS;
+  }
+  int GetAction();
   void FeedReward( int action, float reward );
   
   shared_ptr<State<Dtype> > PlayStep( shared_ptr<State<Dtype> > state, float & totalReward );
   float TrainStep();
   
-  float GetEpsilon() {
-    const float INITIAL_EPSILON = 1.0;
-    const float FINAL_EPSILON = 0.1;
-    const int FINAL_FRAME = 1000000; 
-    if ( this->iter_ > FINAL_FRAME )
-      return FINAL_EPSILON;
-    else
-      return INITIAL_EPSILON - 
-        (INITIAL_EPSILON - FINAL_EPSILON) * ((float)this->iter_ / FINAL_FRAME);
-  }
-  
-  int GetActionFromRandom() {
-    return rand() % NUMBER_OF_LEGAL_ACTIONS;
-  }
+  void ApplyUpdate();
+  void ComputeUpdateValue(int param_id, Dtype rate);
 };
 
 template <typename Dtype>
@@ -93,13 +97,21 @@ int CustomSolver<Dtype>::GetActionFromNet() {
 }
 
 template <typename Dtype>
-int CustomSolver<Dtype>::GetAction( float epsilon ) {
-  CHECK_LE(0, epsilon);
-  CHECK_LE(epsilon, 1);
+int CustomSolver<Dtype>::GetAction() {
+  const float INITIAL_EPSILON = 1.0;
+  const float FINAL_EPSILON = 0.1;
+  const int FINAL_FRAME = 1000000; 
+  
+  float epsilon;
+  if ( this->iter_ > FINAL_FRAME )
+    epsilon = FINAL_EPSILON;
+  else
+    epsilon = INITIAL_EPSILON - 
+      (INITIAL_EPSILON - FINAL_EPSILON) * ((float)this->iter_ / FINAL_FRAME);
   float r;
   caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
   if ( r < epsilon ) {
-    return rand() % NUMBER_OF_LEGAL_ACTIONS;
+    return GetRandomAction();
   } else {
     return GetActionFromNet();
   }
@@ -108,44 +120,46 @@ int CustomSolver<Dtype>::GetAction( float epsilon ) {
 template <typename Dtype>
 void CustomSolver<Dtype>::FeedReward( int action, float reward ) {
   const Dtype* pred = predBlob_->cpu_data();
-  for ( int i = 0; i < NUMBER_OF_LEGAL_ACTIONS; ++i )
-    CHECK_EQ( pred[i], pred[i] );
   rewardBlob_->CopyFrom( *predBlob_, false, true );
   Dtype* rewardData = rewardBlob_->mutable_cpu_data();
-  rewardData[rewardBlob_->offset(0, action, 0, 0)] = static_cast<Dtype>(reward);
+  Dtype actionPred = pred[action];
+  reward -= actionPred;
+  if ( reward > 1.0 )
+    reward = 1.0;
+  if ( reward < -1.0 )
+    reward = -1.0;
+  rewardData[action] = static_cast<Dtype>(reward + actionPred);
 }
 
 template <typename Dtype>
 shared_ptr<State<Dtype> > CustomSolver<Dtype>::PlayStep( shared_ptr<State<Dtype> > nowState, float & totalReward ) {
   int action;
   if ( this->iter_ <= REPLAY_START_SIZE )
-    action = GetActionFromRandom();
+    action = GetRandomAction();
   else {
     nowState->Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
-    action = GetAction( GetEpsilon() );
+    action = GetAction();
   }
   float reward;
   shared_ptr<State<Dtype> > state = environment_.Observe( action, reward );
   // LOG(INFO) << "PlayStep : observed (action, reward) = " << action << ", " << reward;
-  history_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
+  expHistory_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
   totalReward += reward;
   return state;
 }
 
 template <typename Dtype>
 float CustomSolver<Dtype>::TrainStep() {
-  Transition<Dtype> trans = history_.Sample();
+  Transition<Dtype> trans = expHistory_.Sample();
   float reward = trans.reward;
   const float GAMMA = 0.99;
   if ( trans.state_1 ) {
     trans.state_1->Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
     int action = GetActionFromNet();
-    //float pred = this->net_->blobs()[PREDICATE_BLOB_ID]->cpu_data()[action];
-    float pred = this->net_->output_blobs()[0]->cpu_data()[1];
-    CHECK_EQ( pred, pred );
-    //LOG(INFO) << "TrainStep : pred = ", pred;
+    float pred = actionBlob_->cpu_data()[1];
+    // CHECK_EQ( pred, pred );
     reward += GAMMA * pred;
   }
   trans.state_0->Feed( stateBlob_ );
@@ -154,6 +168,65 @@ float CustomSolver<Dtype>::TrainStep() {
   this->net_->ForwardPrefilled( &loss );
   this->net_->Backward();
   return loss;
+}
+
+template <typename Dtype>
+void CustomSolver<Dtype>::ApplyUpdate() {
+  Dtype rate = this->GetLearningRate();
+  if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
+    LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
+  }
+  this->ClipGradients();
+  for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
+    this->Normalize(param_id);
+    this->Regularize(param_id);
+    ComputeUpdateValue(param_id, rate);
+  }
+  this->net_->Update();
+}
+
+template <typename Dtype>
+void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
+  const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
+  const vector<float>& net_params_lr = this->net_->params_lr();
+  Dtype momentum = this->param_.momentum();
+  Dtype momentumC = 1.0 - momentum;
+  Dtype local_rate = rate * net_params_lr[param_id];
+  const int count = net_params[param_id]->count();
+  shared_ptr<Blob<Dtype> > dw = net_params[param_id];
+  shared_ptr<Blob<Dtype> > g = this->history_[param_id];
+  shared_ptr<Blob<Dtype> > g2 = this->sqGrad_[param_id];
+  shared_ptr<Blob<Dtype> > tmp = this->tmpGrad_[param_id];
+  // Compute the update to history, then copy it to the parameter diff.
+  switch (Caffe::mode()) {
+  case Caffe::CPU: {
+    caffe::caffe_cpu_axpby( count, momentumC, dw->cpu_diff(),
+      momentum, g->mutable_cpu_data() );
+    caffe::caffe_mul( count, dw->cpu_diff(), dw->cpu_diff(),
+      tmp->mutable_cpu_data() );
+    caffe::caffe_cpu_axpby( count, momentumC, tmp->cpu_data(),
+      momentum, g2->mutable_cpu_data() );
+    caffe::caffe_mul( count, g->cpu_data(), g->cpu_data(),
+      tmp->mutable_cpu_data() );
+    caffe::caffe_cpu_axpby( count, Dtype(1), g2->cpu_data(),
+      Dtype(-1), tmp->mutable_cpu_data() );
+    caffe::caffe_add_scalar( count, Dtype(0.01), tmp->mutable_cpu_data() );
+    // vsSqrt( count, tmp->cpu_data(), tmp->mutable_cpu_data() );
+    for ( int i = 0; i < count; ++i ) {
+      Dtype & t = tmp->mutable_cpu_data()[i];
+      t = sqrt( t );
+    }
+    caffe::caffe_div( count, dw->cpu_diff(), tmp->cpu_data(),
+      dw->mutable_cpu_diff() );
+    caffe::caffe_scal( count, local_rate, dw->mutable_cpu_diff() );
+    break;
+  }
+  case Caffe::GPU: {
+    NOT_IMPLEMENTED;
+  }
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
 }
 
 template <typename Dtype>
