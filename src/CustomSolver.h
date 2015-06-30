@@ -53,7 +53,7 @@ public:
 protected:
   enum {
     NUMBER_OF_LEGAL_ACTIONS = 18,
-    REPLAY_START_SIZE = 50,
+    REPLAY_START_SIZE = 50000,
     HISTORY_SIZE = 1000000
   };
   
@@ -76,7 +76,7 @@ protected:
   int GetAction();
   void FeedReward( int action, float reward );
   
-  shared_ptr<State<Dtype> > PlayStep( shared_ptr<State<Dtype> > state, float & totalReward );
+  State<Dtype> PlayStep( State<Dtype> state, float & totalReward );
   float TrainStep();
   
   void ApplyUpdate();
@@ -132,17 +132,18 @@ void CustomSolver<Dtype>::FeedReward( int action, float reward ) {
 }
 
 template <typename Dtype>
-shared_ptr<State<Dtype> > CustomSolver<Dtype>::PlayStep( shared_ptr<State<Dtype> > nowState, float & totalReward ) {
+State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & totalReward ) {
   int action;
   if ( this->iter_ <= REPLAY_START_SIZE )
     action = GetRandomAction();
   else {
-    nowState->Feed( stateBlob_ );
+    nowState.Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
     action = GetAction();
   }
   float reward;
-  shared_ptr<State<Dtype> > state = environment_.Observe( action, reward );
+  State<Dtype> state = environment_.Observe( action, reward );
+  //state.inspect( "PlayStep()" );
   // LOG(INFO) << "PlayStep : observed (action, reward) = " << action << ", " << reward;
   expHistory_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
   totalReward += reward;
@@ -154,15 +155,15 @@ float CustomSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
   float reward = trans.reward;
   const float GAMMA = 0.99;
-  if ( trans.state_1 ) {
-    trans.state_1->Feed( stateBlob_ );
+  if ( trans.state_1.isValid() ) {
+    trans.state_1.Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
     int action = GetActionFromNet();
     float pred = actionBlob_->cpu_data()[1];
     // CHECK_EQ( pred, pred );
     reward += GAMMA * pred;
   }
-  trans.state_0->Feed( stateBlob_ );
+  trans.state_0.Feed( stateBlob_ );
   FeedReward( trans.action, reward );
   float loss;
   this->net_->ForwardPrefilled( &loss );
@@ -211,7 +212,7 @@ void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
     caffe::caffe_cpu_axpby( count, Dtype(1), g2->cpu_data(),
       Dtype(-1), tmp->mutable_cpu_data() );
     caffe::caffe_add_scalar( count, Dtype(0.01), tmp->mutable_cpu_data() );
-    // vsSqrt( count, tmp->cpu_data(), tmp->mutable_cpu_data() );
+    // TODO : use element-wise sqrt provided by library
     for ( int i = 0; i < count; ++i ) {
       Dtype & t = tmp->mutable_cpu_data()[i];
       t = sqrt( t );
@@ -237,7 +238,7 @@ void CustomSolver<Dtype>::Step ( int iters ) {
   int average_loss = this->param_.average_loss();
   vector<Dtype> losses;
   Dtype smoothed_loss = 0;
-  shared_ptr<State<Dtype> > nowState( (State<Dtype>*)NULL );
+  State<Dtype> nowState;
   float episodeReward = 0.0, totalReward = 0.0;
   int episodeCount = 0;
 
@@ -267,7 +268,7 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     // accumulate the loss and gradient
     
     // This happens when game-over occurs, or at the first iteration.
-    if ( !nowState ) {
+    if ( !nowState.isValid() ) {
       totalReward += episodeReward;
       if ( episodeCount ) {
         LOG(INFO) << "Episode #" << episodeCount << " ends with total score = "

@@ -9,7 +9,7 @@ class Environment {
 public:
   Environment();
   
-  shared_ptr<State<Dtype> > Observe( int action, float & reward );
+  State<Dtype> Observe( int action, float & reward );
   
   void SetALE( ALEInterface* ale ) {
     ale_ = ale;
@@ -43,7 +43,8 @@ public:
     return gray_scale_[x * SCREEN_WIDTH + y];
   }
   
-  Dtype* GetFrame() {
+  shared_ptr<FrameState<Dtype> > GetFrame() {
+    CHECK( !GameOver() );
     const ALEScreen & screen = ale_->getScreen();
     
     CHECK_EQ( screen.height(), SCREEN_HEIGHT );
@@ -66,41 +67,34 @@ public:
         pixels[i * CROP_WIDTH + j] = l * ( 1 - x ) + r * x;
       }
     }
-    //inspect( pixels, "GetFrame()" );
     
-    return pixels;
-  }
-  
-  void inspect( Dtype* pixels, string text ) {
-    cout << text << " --> inspect() : pixels = " << pixels << endl;
-    for ( int i = 0; i < CROP_HEIGHT; ++i ) {
-      for ( int j = 0; j < CROP_WIDTH; ++j ) {
-        cout << int(pixels[i * CROP_WIDTH + j] > 0.5);
-      }
-      cout << endl;
-    }
-    cout << endl;
+    FrameState<Dtype>* frame = new FrameState<Dtype>( pixels, CROP_SIZE );
+    
+    // frame->inspect();
+    
+    return shared_ptr<FrameState<Dtype> >( frame );
   }
   
   // We do not reset the game on game_over here; we expect the solver do this.
-  shared_ptr<State<Dtype> > GetState( bool newGame ) {
+  State<Dtype> GetState( bool newGame ) {
     if ( GameOver() ) {
-      return shared_ptr<State<Dtype> >( (State<Dtype>*)NULL );
+      return State<Dtype>();
     }
-    Dtype* framePixel = GetFrame();
+    shared_ptr<FrameState<Dtype> > nowFrame = GetFrame();
+    
+    //nowFrame->inspect( "GetState :: nowFrame" );
+    
     if ( newGame ) {
       for ( int i = 0; i < HISTORY_SIZE; ++i ) {
-        caffe::caffe_copy( CROP_SIZE, framePixel, history_[i] );
+        frames_[i] = nowFrame;
       }
     } else {
       for ( int i = HISTORY_SIZE - 1; i >= 1; --i ) {
-        caffe::caffe_copy( CROP_SIZE, history_[i - 1], history_[i] );
+        frames_[i] = frames_[i - 1];
       }
-      caffe::caffe_copy( CROP_SIZE, framePixel, history_[0] );
+      frames_[0] = nowFrame;
     }
-    return shared_ptr<State<Dtype> >(
-      new State<Dtype>( history_[0], HISTORY_SIZE * CROP_SIZE )
-    );
+    return State<Dtype>( frames_, HISTORY_SIZE );
   }
   
 private:
@@ -120,7 +114,7 @@ private:
   ALEInterface* ale_;
   ActionVect legal_actions_;
   Dtype gray_scale_[SCREEN_WIDTH * SCREEN_HEIGHT];
-  Dtype history_[HISTORY_SIZE][CROP_SIZE];
+  shared_ptr<FrameState<Dtype> > frames_[4];
   
   DISABLE_COPY_AND_ASSIGN( Environment );
 };
@@ -130,7 +124,7 @@ Environment<Dtype>::Environment() {
 }
 
 template <typename Dtype>
-shared_ptr<State<Dtype> > Environment<Dtype>::Observe( int action, float & reward ) {
+State<Dtype> Environment<Dtype>::Observe( int action, float & reward ) {
   Action a = legal_actions_[action];
   reward = 0;
   for ( int i = 0; i < ACTION_REPEAT; ++i )
