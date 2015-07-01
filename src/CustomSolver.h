@@ -54,7 +54,8 @@ protected:
   enum {
     NUMBER_OF_LEGAL_ACTIONS = 18,
     REPLAY_START_SIZE = 50000,
-    HISTORY_SIZE = 1000000
+    HISTORY_SIZE = 1000000,
+    UPDATE_FREQUENCY = 4
   };
   
   ExpHistory<Dtype> expHistory_;
@@ -265,21 +266,23 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     const bool display = this->param_.display() 
       && this->iter_ % this->param_.display() == 0;
     this->net_->set_debug_info(display && this->param_.debug_info());
-    // accumulate the loss and gradient
     
-    // This happens when game-over occurs, or at the first iteration.
-    if ( !nowState.isValid() ) {
-      totalReward += episodeReward;
-      if ( episodeCount ) {
-        LOG(INFO) << "Episode #" << episodeCount << " ends with total score = "
-          << episodeReward << ", average score = " << totalReward / episodeCount;
+    // Our agent selects UPDATE_FREQUENCY actions between successive SGD update.
+    for ( int i = 0; i < UPDATE_FREQUENCY; ++i ){
+      // This happens when game-over occurs, or at the first iteration.
+      if ( !nowState.isValid() ) {
+        totalReward += episodeReward;
+        if ( episodeCount ) {
+          LOG(INFO) << "Episode #" << episodeCount << " ends with total score = "
+            << episodeReward << ", average score = " << totalReward / episodeCount;
+        }
+        ++episodeCount;
+        episodeReward = 0;
+        environment_.ResetGame();
+        nowState = environment_.GetState( true );
       }
-      ++episodeCount;
-      episodeReward = 0;
-      environment_.ResetGame();
-      nowState = environment_.GetState( true );
+      nowState = PlayStep( nowState, episodeReward );
     }
-    nowState = PlayStep( nowState, episodeReward );
     
     Dtype loss = 0;
     if ( this->iter_ > REPLAY_START_SIZE )
