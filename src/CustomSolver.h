@@ -9,6 +9,9 @@
 
 #include <cmath>
 
+using caffe::SolverState;
+using caffe::BlobProto;
+
 #define FIND_BLOB(name) \
   name##Blob_ = NULL; \
   name##Blob_ = this->net_->blob_by_name(#name).get(); \
@@ -81,7 +84,10 @@ protected:
   float TrainStep();
   
   void ApplyUpdate();
-  void ComputeUpdateValue(int param_id, Dtype rate);
+  void ComputeUpdateValue( int param_id, Dtype rate );
+  
+  virtual void SnapshotSolverState( SolverState* state );
+  virtual void RestoreSolverState( const SolverState & state );
 };
 
 template <typename Dtype>
@@ -314,6 +320,32 @@ void CustomSolver<Dtype>::Step ( int iters ) {
         && this->iter_ % this->param_.snapshot() == 0) {
       this->Snapshot();
     }
+  }
+}
+
+template <typename Dtype>
+void CustomSolver<Dtype>::SnapshotSolverState(SolverState* state) {
+  state->clear_history();
+  for ( int i = 0; i < this->history_.size(); ++i ) {
+    // Add gradient history
+    BlobProto* history_blob = state->add_history();
+    this->history_[i]->ToProto( history_blob );
+  }
+  for ( int i = 0; i < sqGrad_.size(); ++i ) {
+    // Add squared gradient history
+    BlobProto* history_blob = state->add_history();
+    sqGrad_[i]->ToProto( history_blob );
+  }
+}
+
+template <typename Dtype>
+void CustomSolver<Dtype>::RestoreSolverState(const SolverState& state) {
+  CHECK_EQ( state.history_size(), this->history_.size() + sqGrad_.size() )
+      << "Incorrect length of history blobs.";
+  LOG(INFO) << "CustomSolver: restoring history";
+  for ( int i = 0; i < this->history_.size(); ++i ) {
+    this->history_[i]->FromProto( state.history( i ) );
+    sqGrad_[i]->FromProto( state.history( i + this->history_.size() ) );
   }
 }
 
