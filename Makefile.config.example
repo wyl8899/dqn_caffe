@@ -1,0 +1,18 @@
+# train flags
+
+train_solver := proto/solver.prototxt
+train_rom := roms/space_invaders.bin
+
+# specify other flags than those covered above, if any
+# train_flags := 
+
+# libraries
+
+CAFFE_ROOT := /home/wyl8899/projects/caffe
+
+BLAS_INCLUDE := /home/wyl8899/lib/atlas/include
+BLAS_LIB := /home/wyl8899/lib/atlas/lib
+
+ALE_ROOT := /home/wyl8899/projects/ale
+
+SDL_INCLUDE := /usr/include/SDL
