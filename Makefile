@@ -7,8 +7,11 @@ include $(CONFIG_FILE)
 
 # generate train flags as specified in config file
 
-train_flags += --solver=$(train_solver)
-train_flags += --rom=$(train_rom)
+train_flags += --solver=$(PROTO_DIR)/$(train_solver)
+train_flags += --rom=$(ROM_DIR)/$(rom)
+test_flags += --solver=$(PROTO_DIR)/$(test_solver)
+test_flags += --rom=$(ROM_DIR)/$(rom)
+test_flags += --snapshot=$(SNAPSHOT_DIR)/$(test_snapshot)
 
 # generate LIBRARIES, INCLUDE_DIRS, LIBRARY_DIRS based on library directories given by config file
 
@@ -64,8 +67,11 @@ $(EXEC): $(SRC_OBJECTS)
 %.o : %.cpp $(HEADERS)
 	$(Q) g++ $< $(CXXFLAGS) -c -o $@
 	
-run: all
-	./dqn $(train_flags)
+train: $(EXEC)
+	./$(EXEC) train $(train_flags)
+	
+test: $(EXEC)
+	./$(EXEC) test $(test_flags)
 
 clean:
 	rm $(EXEC)

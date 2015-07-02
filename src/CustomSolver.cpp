@@ -55,7 +55,6 @@ int CustomSolver<Dtype>::GetAction() {
   const float INITIAL_EPSILON = 1.0;
   const float FINAL_EPSILON = 0.1;
   const int FINAL_FRAME = 1000000; 
-  
   float epsilon;
   if ( this->iter_ > FINAL_FRAME )
     epsilon = FINAL_EPSILON;

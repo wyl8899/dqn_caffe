@@ -1,5 +1,6 @@
 #include "CommonIncludes.h"
 #include "CustomSolver.h"
+#include "CustomTestSolver.h"
 
 DEFINE_int32(gpu, -1,
     "Run in GPU mode on given device ID.");
@@ -14,8 +15,8 @@ DEFINE_string(weights, "",
     "Cannot be set simultaneously with snapshot.");
 DEFINE_int32(iterations, 50,
     "The number of iterations to run.");
-DEFINE_string( rom, "", 
-    "The rom file of the game." ); 
+DEFINE_string(rom, "", 
+    "The rom file of the game."); 
 
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.
@@ -31,6 +32,7 @@ void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
   }
 }
 
+template <class T>
 shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
   // Print output to stderr (while still logging).
   FLAGS_alsologtostderr = 1;
@@ -61,7 +63,7 @@ shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
   }
   
   shared_ptr<CustomSolver<float> >
-    solver(new CustomSolver<float>(solver_param));
+    solver(new T(solver_param));
     
   return solver;
 }
@@ -82,7 +84,20 @@ ALEInterface* ale_init() {
 }
 
 int main( int argc, char** argv ) {
-  shared_ptr<CustomSolver<float> > solver = caffe_init( argc, argv );
+  shared_ptr<CustomSolver<float> > solver;
+  string command( argv[1] );
+  if ( command == "train" ) {
+    solver = caffe_init<CustomSolver<float> >( argc, argv );
+  } else if ( command == "test" ) {
+    solver = caffe_init<CustomTestSolver<float> >( argc, argv );
+    CHECK_GT( FLAGS_snapshot.size(), 0 );
+  } else {
+    LOG(ERROR) << "usage: dqn <command> <args>\n\n"
+      "commands:\n"
+      "  train           train or finetune a model\n"
+      "  test            score a model\n";
+    LOG(FATAL) << "Unknown command : " << command;
+  } 
   ALEInterface* ale = ale_init();
   solver->SetALE( ale );
   
