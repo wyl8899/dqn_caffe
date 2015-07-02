@@ -40,12 +40,14 @@ protected:
   vector<shared_ptr<Blob<Dtype> > > sqGrad_, tmpGrad_;
   
   void FeedState();
+  void FeedReward( int action, float reward );
+  
+  float GetEpsilon();
   int GetActionFromNet();
   inline int GetRandomAction() {
     return rand() % NUMBER_OF_LEGAL_ACTIONS;
   }
   int GetAction();
-  void FeedReward( int action, float reward );
   
   void Step( int );
   State<Dtype> PlayStep( State<Dtype> state, float & totalReward );

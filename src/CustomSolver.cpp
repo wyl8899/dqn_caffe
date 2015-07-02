@@ -51,7 +51,7 @@ int CustomSolver<Dtype>::GetActionFromNet() {
 }
 
 template <typename Dtype>
-int CustomSolver<Dtype>::GetAction() {
+float CustomSolver<Dtype>::GetEpsilon() {
   const float INITIAL_EPSILON = 1.0;
   const float FINAL_EPSILON = 0.1;
   const int FINAL_FRAME = 1000000; 
@@ -61,6 +61,12 @@ int CustomSolver<Dtype>::GetAction() {
   else
     epsilon = INITIAL_EPSILON - 
       (INITIAL_EPSILON - FINAL_EPSILON) * ((float)this->iter_ / FINAL_FRAME);
+  return epsilon;
+}
+
+template <typename Dtype>
+int CustomSolver<Dtype>::GetAction() {
+  float epsilon = GetEpsilon();
   float r;
   caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
   if ( r < epsilon ) {
@@ -127,9 +133,6 @@ Dtype CustomSolver<Dtype>::TrainStep() {
 template <typename Dtype>
 void CustomSolver<Dtype>::ApplyUpdate() {
   Dtype rate = this->GetLearningRate();
-  if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
-    LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
-  }
   this->ClipGradients();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
     this->Regularize(param_id);
@@ -223,10 +226,7 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       // This happens when game-over occurs, or at the first iteration.
       if ( !nowState.isValid() ) {
         totalReward += episodeReward;
-        if ( episodeCount ) {
-          LOG(INFO) << "Episode #" << episodeCount << " ends with total score = "
-            << episodeReward << ", average score = " << totalReward / episodeCount;
-        }
+        LOG(INFO) << "  Episode ends with score " << episodeReward; 
         ++episodeCount;
         episodeReward = 0;
         environment_.ResetGame();
@@ -252,7 +252,12 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       losses[idx] = loss;
     }
     if (display) {
-      LOG(INFO) << "Iteration " << this->iter_ << ", loss = " << smoothed_loss;
+      float epsilon = (this->iter_ > REPLAY_START_SIZE) ? GetEpsilon() : 1.0;
+      LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
+      LOG(INFO) << "  Average score = " << totalReward / episodeCount
+            << " over the most recent " << episodeCount << " game(s).";
+      totalReward = 0.0;
+      episodeCount = 0;
     }
     this->ApplyUpdate();
 
