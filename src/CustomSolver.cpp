@@ -132,7 +132,6 @@ void CustomSolver<Dtype>::ApplyUpdate() {
   }
   this->ClipGradients();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
-    this->Normalize(param_id);
     this->Regularize(param_id);
     ComputeUpdateValue(param_id, rate);
   }

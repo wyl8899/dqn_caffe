@@ -1,7 +1,7 @@
 net: "proto/net.prototxt"
 
-max_iter: 27000
+max_iter: 160000
 
-display: 1000
+display: 5000
 
 solver_mode: CPU
