@@ -87,11 +87,11 @@ int main( int argc, char** argv ) {
   solver->SetALE( ale );
   
   LOG(INFO) << "Starting Optimization";
-  if (FLAGS_snapshot.size()) {
+  if ( FLAGS_snapshot.size() ) {
     LOG(INFO) << "Resuming from " << FLAGS_snapshot;
-    solver->Solve(FLAGS_snapshot);
-  } else if (FLAGS_weights.size()) {
-    CopyLayers(&*solver, FLAGS_weights);
+    solver->Solve( FLAGS_snapshot );
+  } else if ( FLAGS_weights.size() ) {
+    CopyLayers( &*solver, FLAGS_weights );
     solver->Solve();
   } else {
     solver->Solve();

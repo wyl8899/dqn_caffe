@@ -58,7 +58,7 @@ HEADERS := $(wildcard $(SRC_DIR)/*.h)
 all: $(EXEC)
 
 $(EXEC): $(SRC_OBJECTS)
-	$(Q) g++ $< -o $@ $(LINKFLAGS) $(LDFLAGS) \
+	$(Q) g++ $(SRC_OBJECTS) -o $@ $(LINKFLAGS) $(LDFLAGS) \
 		-Wl,-rpath,$(CAFFE_LIB) 
 	
 %.o : %.cpp $(HEADERS)
