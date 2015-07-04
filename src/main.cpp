@@ -17,6 +17,8 @@ DEFINE_int32(iterations, 50,
     "The number of iterations to run.");
 DEFINE_string(rom, "", 
     "The rom file of the game."); 
+DEFINE_int32(display, 0,
+    "Display ALE Viz if set non-zero.");
 
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.
@@ -75,10 +77,10 @@ shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
 ALEInterface* ale_init() {
   static ALEInterface ale;
   ale.setFloat( "repeat_action_probability", 0.0 );
-#ifdef __USE_SDL
-  //ale.setBool("display_screen", true);
-  //ale.setBool("sound", true);
-#endif
+  if ( FLAGS_display ) {
+    ale.setBool("display_screen", true);
+    ale.setBool("sound", true);
+  }
   ale.loadROM( FLAGS_rom );
   return &ale;
 }

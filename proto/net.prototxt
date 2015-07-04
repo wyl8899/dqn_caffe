@@ -1,3 +1,5 @@
+# Adjust input blob "reward" and output num of "ip2"
+# according to the number of legal actions of the game.
 name: "DQN"
 input: "state"
 input_shape {
@@ -9,7 +11,7 @@ input_shape {
 input: "reward"
 input_shape {
   dim: 1
-  dim: 18
+  dim: 6
   dim: 1
   dim: 1
 }
@@ -18,35 +20,30 @@ layer {
   type: "Convolution"
   bottom: "state"
   top: "conv1"
-  param { lr_mult: 1 decay_mult: 1 }
-  param { lr_mult: 2 decay_mult: 0 }
   convolution_param {
-    num_output: 32
+    num_output: 16
     kernel_size: 8
     stride: 4
     weight_filler {
       type: "gaussian"
       std: 0.01
     }
-    bias_filler {
-      type: "constant"
-      value: 0
-    }
   }
 }
 layer {
-  name: "relu1"
+  name: "conv1_relu"
   type: "ReLU"
   bottom: "conv1"
-  top: "relu1"
+  top: "conv1"
+  relu_param {
+    negative_slope: 0.01
+  }
 }
 layer {
   name: "conv2"
   type: "Convolution"
-  bottom: "relu1"
+  bottom: "conv1"
   top: "conv2"
-  param { lr_mult: 1 decay_mult: 1 }
-  param { lr_mult: 2 decay_mult: 0 }
   convolution_param {
     num_output: 64
     kernel_size: 4
@@ -55,90 +52,50 @@ layer {
       type: "gaussian"
       std: 0.01
     }
-    bias_filler {
-      type: "constant"
-      value: 0
-    }
   }
 }
 layer {
-  name: "relu2"
+  name: "conv2_relu"
   type: "ReLU"
   bottom: "conv2"
-  top: "relu2"
-}
-layer {
-  name: "conv3"
-  type: "Convolution"
-  bottom: "relu2"
-  top: "conv3"
-  param { lr_mult: 1 decay_mult: 1 }
-  param { lr_mult: 2 decay_mult: 0 }
-  convolution_param {
-    num_output: 64
-    kernel_size: 3
-    stride: 1
-    weight_filler {
-      type: "gaussian"
-      std: 0.01
-    }
-    bias_filler {
-      type: "constant"
-      value: 0
-    }
+  top: "conv2"
+  relu_param {
+    negative_slope: 0.01
   }
-}
-layer {
-  name: "relu3"
-  type: "ReLU"
-  bottom: "conv3"
-  top: "relu3"
 }
 layer {
   name: "ip1"
   type: "InnerProduct"
-  bottom: "relu3"
+  bottom: "conv2"
   top: "ip1"
-  param {
-    lr_mult: 1
-  }
-  param {
-    lr_mult: 2
-  }
   inner_product_param {
-    num_output: 512
-    bias_term: true
+    num_output: 256
     weight_filler {
-    	type: "xavier"
-    }
-    bias_filler {
-      type: "constant"
-      value: 0
+    	type: "gaussian"
+    	std: 0.01
     }
   }
 }
 layer {
-  name: "relu4"
+  name: "ip1_relu"
   type: "ReLU"
   bottom: "ip1"
-  top: "relu4"
+  top: "ip1"
+  relu_param {
+    negative_slope: 0.01
+  }
 }
 layer {
   name: "ip2"
   type: "InnerProduct"
-  bottom: "relu4"
+  bottom: "ip1"
   top: "pred"
-  param {
-    lr_mult: 1
-  }
-  param {
-    lr_mult: 2
-  }
   inner_product_param {
-    num_output: 18
+    num_output: 6
     bias_term: true
     weight_filler {
-    	type: "xavier"
+    	type: "gaussian"
+    	std: 0.01
     }
     bias_filler {
       type: "constant"

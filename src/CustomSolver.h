@@ -19,13 +19,17 @@ public:
   }
   inline void SetALE( ALEInterface* ale ) {
     environment_.SetALE( ale );
+    legalActionCount_ = environment_.GetLegalActionCount();
+    CHECK_EQ( legalActionCount_, predBlob_->count() )
+      << "Output size of the network should equal the number of "
+         "legal actions";
   }
 protected:
   enum {
-    NUMBER_OF_LEGAL_ACTIONS = 18,
-    REPLAY_START_SIZE = 50000,
-    HISTORY_SIZE = 1000000,
-    UPDATE_FREQUENCY = 4
+    REPLAY_START_SIZE = 100,
+    HISTORY_SIZE = 500000,
+    UPDATE_FREQUENCY = 4,
+    FRAME_SKIP = 3
   };
   
   ExpHistory<Dtype> expHistory_;
@@ -37,6 +41,8 @@ protected:
   Blob<Dtype> *predBlob_;
   Blob<Dtype> *actionBlob_;
   
+  int legalActionCount_;
+  
   vector<shared_ptr<Blob<Dtype> > > sqGrad_, tmpGrad_;
   
   void FeedState();
@@ -45,7 +51,7 @@ protected:
   float GetEpsilon();
   int GetActionFromNet();
   inline int GetRandomAction() {
-    return rand() % NUMBER_OF_LEGAL_ACTIONS;
+    return rand() % legalActionCount_;
   }
   int GetAction();
   
@@ -53,6 +59,7 @@ protected:
   State<Dtype> PlayStep( State<Dtype> state, float & totalReward );
   Dtype TrainStep();
   
+  void ZeroGradients();
   void ApplyUpdate();
   void ComputeUpdateValue( int param_id, Dtype rate );
   

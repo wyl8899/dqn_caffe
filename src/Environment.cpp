@@ -5,15 +5,11 @@ Environment<Dtype>::Environment() {
 }
 
 template <typename Dtype>
-State<Dtype> Environment<Dtype>::Observe( int action, float & reward ) {
+State<Dtype> Environment<Dtype>::Observe( int action, float & reward, int repeat ) {
   Action a = legal_actions_[action];
   reward = 0;
-  for ( int i = 0; i < ACTION_REPEAT; ++i )
+  for ( int i = 0; i < repeat; ++i )
     reward += ale_->act( a );
-  if ( reward > 0.0 )
-    reward = 1.0;
-  if ( reward < 0.0 )
-    reward = -1.0;
   return GetState( false );
 }
 

@@ -7,12 +7,12 @@ ROM_DIR = roms
 
 train_solver := solver.prototxt
 test_solver := test_solver.prototxt
-test_snapshot := _iter_180000.solverstate
+test_snapshot := _iter_20000.solverstate
 rom := space_invaders.bin
 
 # specify other flags than those covered above, if any
-# train_flags := 
-# test_flags :=
+train_flags :=
+test_flags :=
 
 # libraries
 

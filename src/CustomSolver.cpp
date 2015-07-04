@@ -37,6 +37,8 @@ CustomSolver<Dtype>::CustomSolver( const SolverParameter& param )
   }
 }
 
+#undef FIND_BLOB
+
 template <typename Dtype>
 void CustomSolver<Dtype>::FeedState() {
   const vector<Blob<Dtype>*> & inputs = this->net_->input_blobs();
@@ -46,7 +48,21 @@ void CustomSolver<Dtype>::FeedState() {
 
 template <typename Dtype>
 int CustomSolver<Dtype>::GetActionFromNet() {
+  static int count[18] = {0};
+  static const int display = 200;
+  static int count_total = 0;
   int action = actionBlob_->cpu_data()[0];
+  count[action]++;
+  count_total++;
+  if ( count_total == display ) {
+    count_total = 0;
+    ostringstream ss;
+    for ( int i = 0; i < legalActionCount_; ++i ) {
+      ss << "[" << i << ": " << count[i] << "] ";
+      count[i] = 0;
+    }
+    LOG(INFO) << ss.str();
+  }
   return action;
 }
 
@@ -82,12 +98,12 @@ void CustomSolver<Dtype>::FeedReward( int action, float reward ) {
   rewardBlob_->CopyFrom( *predBlob_, false, true );
   Dtype* rewardData = rewardBlob_->mutable_cpu_data();
   Dtype actionPred = pred[action];
-  reward -= actionPred;
-  if ( reward > 1.0 )
-    reward = 1.0;
-  if ( reward < -1.0 )
-    reward = -1.0;
-  rewardData[action] = static_cast<Dtype>(reward + actionPred);
+  float delta = reward - actionPred;
+  if ( delta > 1.0 )
+    delta = 1.0;
+  if ( delta < -1.0 )
+    delta = -1.0;
+  rewardData[action] = static_cast<Dtype>(delta + actionPred);
 }
 
 template <typename Dtype>
@@ -101,9 +117,14 @@ State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & total
     action = GetAction();
   }
   float reward;
-  State<Dtype> state = environment_.Observe( action, reward );
+  State<Dtype> state = environment_.Observe( action, reward, FRAME_SKIP );
+  // Clip rewards
+  if ( reward > 0.0 )
+    reward = 1.0;
+  if ( reward < 0.0 )
+    reward = -1.0;
   //state.inspect( "PlayStep()" );
-  // LOG(INFO) << "PlayStep : observed (action, reward) = " << action << ", " << reward;
+  //LOG(INFO) << "PlayStep : observed (action, reward) = " << action << ", " << reward;
   expHistory_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
   totalReward += reward;
   return state;
@@ -112,15 +133,16 @@ State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & total
 template <typename Dtype>
 Dtype CustomSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
-  float reward = trans.reward;
-  const float GAMMA = 0.99;
+  float reward;
+  const float GAMMA = 0.95; 
   if ( trans.state_1.isValid() ) {
     trans.state_1.Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
     int action = GetActionFromNet();
     float pred = actionBlob_->cpu_data()[1];
-    // CHECK_EQ( pred, pred );
-    reward += GAMMA * pred;
+    reward = trans.reward + GAMMA * pred;
+  } else {
+    reward = trans.reward;
   }
   trans.state_0.Feed( stateBlob_ );
   FeedReward( trans.action, reward );
@@ -135,6 +157,7 @@ void CustomSolver<Dtype>::ApplyUpdate() {
   Dtype rate = this->GetLearningRate();
   this->ClipGradients();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
+    this->Normalize(param_id);
     this->Regularize(param_id);
     ComputeUpdateValue(param_id, rate);
   }
@@ -145,15 +168,14 @@ template <typename Dtype>
 void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
   const vector<float>& net_params_lr = this->net_->params_lr();
-  Dtype momentum = this->param_.momentum();
-  Dtype momentumC = 1.0 - momentum;
+  const Dtype momentum = this->param_.momentum();
+  const Dtype momentumC = 1.0 - momentum;
   Dtype local_rate = rate * net_params_lr[param_id];
   const int count = net_params[param_id]->count();
   shared_ptr<Blob<Dtype> > dw = net_params[param_id];
   shared_ptr<Blob<Dtype> > g = this->history_[param_id];
   shared_ptr<Blob<Dtype> > g2 = this->sqGrad_[param_id];
   shared_ptr<Blob<Dtype> > tmp = this->tmpGrad_[param_id];
-  // Compute the update to history, then copy it to the parameter diff.
   switch (Caffe::mode()) {
   case Caffe::CPU: {
     caffe::caffe_cpu_axpby( count, momentumC, dw->cpu_diff(),
@@ -162,19 +184,12 @@ void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
       tmp->mutable_cpu_data() );
     caffe::caffe_cpu_axpby( count, momentumC, tmp->cpu_data(),
       momentum, g2->mutable_cpu_data() );
-    caffe::caffe_mul( count, g->cpu_data(), g->cpu_data(),
-      tmp->mutable_cpu_data() );
-    caffe::caffe_cpu_axpby( count, Dtype(1), g2->cpu_data(),
-      Dtype(-1), tmp->mutable_cpu_data() );
-    caffe::caffe_add_scalar( count, Dtype(0.01), tmp->mutable_cpu_data() );
-    // TODO : use element-wise sqrt provided by library
     for ( int i = 0; i < count; ++i ) {
-      Dtype & t = tmp->mutable_cpu_data()[i];
-      t = sqrt( t );
+      Dtype t = g2->cpu_data()[i];
+      Dtype & diff = dw->mutable_cpu_diff()[i];
+      t = sqrt( t ) + Dtype(0.01);
+      diff = diff * local_rate / t;
     }
-    caffe::caffe_div( count, dw->cpu_diff(), tmp->cpu_data(),
-      dw->mutable_cpu_diff() );
-    caffe::caffe_scal( count, local_rate, dw->mutable_cpu_diff() );
     break;
   }
   case Caffe::GPU: {
@@ -182,6 +197,28 @@ void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   }
   default:
     LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
+}
+
+template <typename Dtype>
+void CustomSolver<Dtype>::ZeroGradients() {
+  // zero-init the params
+  for (int i = 0; i < this->net_->params().size(); ++i) {
+    shared_ptr<Blob<Dtype> > blob = this->net_->params()[i];
+    switch (Caffe::mode()) {
+    case Caffe::CPU:
+      caffe_set(blob->count(), static_cast<Dtype>(0),
+          blob->mutable_cpu_diff());
+      break;
+    case Caffe::GPU:
+#ifndef CPU_ONLY
+      caffe_gpu_set(blob->count(), static_cast<Dtype>(0),
+          blob->mutable_gpu_diff());
+#else
+      NO_GPU;
+#endif
+      break;
+    }
   }
 }
 
@@ -198,25 +235,7 @@ void CustomSolver<Dtype>::Step ( int iters ) {
   int episodeCount = 0;
 
   while (this->iter_ < stop_iter) {
-    // zero-init the params
-    for (int i = 0; i < this->net_->params().size(); ++i) {
-      shared_ptr<Blob<Dtype> > blob = this->net_->params()[i];
-      switch (Caffe::mode()) {
-      case Caffe::CPU:
-        caffe_set(blob->count(), static_cast<Dtype>(0),
-            blob->mutable_cpu_diff());
-        break;
-      case Caffe::GPU:
-#ifndef CPU_ONLY
-        caffe_gpu_set(blob->count(), static_cast<Dtype>(0),
-            blob->mutable_gpu_diff());
-#else
-        NO_GPU;
-#endif
-        break;
-      }
-    }
-
+    ZeroGradients();
     const bool display = this->param_.display() 
       && this->iter_ % this->param_.display() == 0;
     this->net_->set_debug_info(display && this->param_.debug_info());
@@ -254,8 +273,9 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     if (display) {
       float epsilon = (this->iter_ > REPLAY_START_SIZE) ? GetEpsilon() : 1.0;
       LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
-      LOG(INFO) << "  Average score = " << totalReward / episodeCount
-            << " over the most recent " << episodeCount << " game(s).";
+      //LOG(INFO) << "  Average score = " << totalReward / episodeCount
+      //      << " over the most recent " << episodeCount << " game(s).";
+      LOG(INFO) << "  Average Q value = " << predBlob_->asum_data() / legalActionCount_;
       totalReward = 0.0;
       episodeCount = 0;
     }

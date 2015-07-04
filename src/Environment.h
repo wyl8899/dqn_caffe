@@ -8,7 +8,7 @@ template <typename Dtype>
 class Environment {
 public:
   Environment();
-  State<Dtype> Observe( int action, float & reward );
+  State<Dtype> Observe( int action, float & reward, int repeat = FRAME_SKIP );
   // We do not reset the game on game_over here (in which case an invalid State is returned).
   // Rather, we expect the solver do this, making it able to know when an episode ends.
   // newGame acts as a signal to reset the frame history.
@@ -16,7 +16,10 @@ public:
   State<Dtype> GetState( bool newGame );
   inline void SetALE( ALEInterface* ale ) {
     ale_ = ale;
-    legal_actions_ = ale_->getLegalActionSet();
+    legal_actions_ = ale_->getMinimalActionSet();
+  }
+  inline int GetLegalActionCount() {
+    return legal_actions_.size();
   }
   inline bool GameOver() {
     return ale_->game_over();
@@ -48,7 +51,7 @@ private:
     CROP_W_SHIFT = 0,
     CROP_H_SHIFT = 13,
     HISTORY_SIZE = 4,
-    ACTION_REPEAT = 4
+    FRAME_SKIP = 4
   };
   ALEInterface* ale_;
   ActionVect legal_actions_;
