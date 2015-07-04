@@ -20,14 +20,17 @@ struct FrameState {
   
   void inspect( string text = "" ) {
     Dtype* pixels = data;
-    cout << text << " --> inspect() : pixels = " << pixels << endl;
+    ostringstream ss;
+    Dtype m = 0.0;
+    ss << text << " --> inspect() : pixels = " << pixels << endl;
     for ( int i = 0; i < FRAME_HEIGHT; ++i ) {
       for ( int j = 0; j < FRAME_WIDTH; ++j ) {
-        cout << int(pixels[i * FRAME_WIDTH + j] * 256 > 0.5);
+        ss << std::hex << int(pixels[i * FRAME_WIDTH + j] * 16);
+        m = max(m, pixels[i * FRAME_WIDTH + j]);
       }
-      cout << endl;
+      ss << endl;
     }
-    cout << text << " <--\n";
+    cout << ss.str() << text << " <--\n";
   }
   
   DISABLE_COPY_AND_ASSIGN( FrameState );

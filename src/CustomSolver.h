@@ -26,7 +26,7 @@ public:
   }
 protected:
   enum {
-    REPLAY_START_SIZE = 100,
+    REPLAY_START_SIZE = 500,
     HISTORY_SIZE = 500000,
     UPDATE_FREQUENCY = 4,
     FRAME_SKIP = 3

@@ -19,7 +19,7 @@ void Environment<Dtype>::GetFrameGrayScale( pixel_t* pixels ) {
   for ( int i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH; ++i ) {
     int r, g, b;
     palette.getRGB( pixels[i], r, g, b );
-    gray_scale_[i] = (0.2126 * r + 0.7152 * g, 0.0722 * b) / 256.0;
+    gray_scale_[i] = (0.2126 * r + 0.7152 * g, 0.0722 * b) / 16.0;
   }
 }
 
@@ -32,25 +32,38 @@ shared_ptr<FrameState<Dtype> > Environment<Dtype>::GetFrame() {
   CHECK_EQ( screen.width(), SCREEN_WIDTH );
   GetFrameGrayScale( screen.getArray() );
   
-  const Dtype height_ratio = (Dtype)SCREEN_HEIGHT / RESCALE_HEIGHT;    
-  const Dtype width_ratio = (Dtype)SCREEN_WIDTH / RESCALE_WIDTH;
+  const double xRatio = (double)SCREEN_HEIGHT / CROP_HEIGHT;    
+  const double yRatio = (double)SCREEN_WIDTH / CROP_WIDTH;
   
   static Dtype pixels[CROP_SIZE];
-  
   for ( int i = 0; i < CROP_HEIGHT; ++i ) {
     for ( int j = 0; j < CROP_WIDTH; ++j ) {
-      Dtype x = (i + CROP_H_SHIFT) * height_ratio;
-      Dtype y = (j + CROP_W_SHIFT) * width_ratio;
-      int s = int(x), t = int(y);
-      x -= s, y -= t;
-      Dtype l = ( 1 - y ) * GrayScale( s, t ) + y * GrayScale( s, t + 1 );
-      Dtype r = ( 1 - y ) * GrayScale( s + 1, t ) + y * GrayScale( s + 1 , t + 1 );
-      pixels[i * CROP_WIDTH + j] = l * ( 1 - x ) + r * x;
+      int xL = int(i * xRatio);
+      int xR = int((i + 1) * xRatio);
+      int yL = int(j * yRatio);
+      int yR = int((j + 1) * yRatio);
+      double result = 0.0;
+#define GET_WEIGHT( i, x, ratio, l, r, weight ) \
+  weight = 1.0; \
+  if ( x == l ) weight = x + 1 - i * ratio; \
+  else if ( x == r ) weight = (i + 1) * ratio - x; \
+  CHECK_LE( 0.0, weight ); \
+  CHECK_LE( weight, 1.0 );
+      double xWeight, yWeight;
+      for ( int x = xL; x <= xR; ++x ) {
+        GET_WEIGHT( i, x, xRatio, xL, xR, xWeight );
+        for ( int y = yL; y <= yR; ++y ) {
+          GET_WEIGHT( j, y, yRatio, yL, yR, yWeight );
+          Dtype grayScale = GrayScale( x, y );
+          result += (xWeight / xRatio) * (yWeight / yRatio) * grayScale;
+        }
+      }
+#undef GET_WEIGHT
+      pixels[i * CROP_WIDTH + j] = result;
     }
   }
-  
   FrameState<Dtype>* frame = new FrameState<Dtype>( pixels, CROP_SIZE );
-  
+  //frame->inspect( "Environment::Getframe" );
   return shared_ptr<FrameState<Dtype> >( frame );
 }
 

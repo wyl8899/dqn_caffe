@@ -43,13 +43,9 @@ private:
   enum {
     SCREEN_WIDTH = 160,
     SCREEN_HEIGHT = 210,
-    RESCALE_HEIGHT = 84,
-    RESCALE_WIDTH = 110,
     CROP_WIDTH = 84,
     CROP_HEIGHT = 84,
     CROP_SIZE = 7056,
-    CROP_W_SHIFT = 0,
-    CROP_H_SHIFT = 13,
     HISTORY_SIZE = 4,
     FRAME_SKIP = 4
   };
