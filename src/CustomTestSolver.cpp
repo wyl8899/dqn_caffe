@@ -1,30 +1,13 @@
 #include "CustomTestSolver.h"
 
 template <typename Dtype>
-CustomTestSolver<Dtype>::CustomTestSolver( const SolverParameter& param )
-  : CustomSolver<Dtype>( param ) {
-}
-
-template <typename Dtype>
-int CustomTestSolver<Dtype>::GetAction() {
-  const float epsilon = 0.05;
-  float r;
-  caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
-  if ( r < epsilon ) {
-    return this->GetRandomAction();
-  } else {
-    return this->GetActionFromNet();
-  }
-}
-
-template <typename Dtype>
 State<Dtype> CustomTestSolver<Dtype>::PlayStep( State<Dtype> nowState, float & totalReward ) {
   int action;
   nowState.Feed( this->stateBlob_ );
   this->net_->ForwardTo( this->lossLayerID_ - 1 );
-  action = GetAction();
+  action = this->GetAction();
   float reward;
-  State<Dtype> state = this->environment_.Observe( action, reward );
+  State<Dtype> state = this->environment_.Observe( action, reward, this->frameSkip_ );
   totalReward += reward;
   return state;
 }

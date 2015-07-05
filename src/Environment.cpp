@@ -6,7 +6,7 @@ Environment<Dtype>::Environment() {
 
 template <typename Dtype>
 State<Dtype> Environment<Dtype>::Observe( int action, float & reward, int repeat ) {
-  Action a = legal_actions_[action];
+  Action a = legal_actions_.at( action );
   reward = 0;
   for ( int i = 0; i < repeat; ++i )
     reward += ale_->act( a );

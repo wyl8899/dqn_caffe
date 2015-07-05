@@ -11,7 +11,8 @@ using caffe::BlobProto;
 
 template <typename Dtype>
 CustomSolver<Dtype>::CustomSolver( const SolverParameter& param )
-  : SGDSolver<Dtype>( param ), expHistory_( HISTORY_SIZE ) {
+  : SGDSolver<Dtype>( param ), expHistory_( FLAGS_history_size ) {
+  // cache information
   const vector<string> & layers = this->net_->layer_names();
   for ( int i = 0; i < layers.size(); ++i ) {
     LOG(INFO) << "Layer #" << i << ": " << layers[i];
@@ -27,6 +28,7 @@ CustomSolver<Dtype>::CustomSolver( const SolverParameter& param )
   FIND_BLOB(pred);
   FIND_BLOB(action);
   
+  // build blobs for update value calculation
   const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
   sqGrad_.clear();
   tmpGrad_.clear();
@@ -35,6 +37,13 @@ CustomSolver<Dtype>::CustomSolver( const SolverParameter& param )
     sqGrad_.push_back(shared_ptr<Blob<Dtype> >(new Blob<Dtype>(shape)));
     tmpGrad_.push_back(shared_ptr<Blob<Dtype> >(new Blob<Dtype>(shape)));
   }
+  
+  // set hyperparameters
+  gamma_ = FLAGS_gamma;
+  epsilon_ = FLAGS_epsilon;
+  learnStart_ = FLAGS_learn_start;
+  updateFreq_ = FLAGS_update_freq;
+  frameSkip_ = FLAGS_frame_skip;
 }
 
 #undef FIND_BLOB
@@ -48,21 +57,7 @@ void CustomSolver<Dtype>::FeedState() {
 
 template <typename Dtype>
 int CustomSolver<Dtype>::GetActionFromNet() {
-  static int count[18] = {0};
-  static const int display = 200;
-  static int count_total = 0;
   int action = actionBlob_->cpu_data()[0];
-  count[action]++;
-  count_total++;
-  if ( count_total == display ) {
-    count_total = 0;
-    ostringstream ss;
-    for ( int i = 0; i < legalActionCount_; ++i ) {
-      ss << "[" << i << ": " << count[i] << "] ";
-      count[i] = 0;
-    }
-    LOG(INFO) << ss.str();
-  }
   return action;
 }
 
@@ -82,13 +77,29 @@ float CustomSolver<Dtype>::GetEpsilon() {
 
 template <typename Dtype>
 int CustomSolver<Dtype>::GetAction() {
+  static int count[18] = {0};
+  static const int display = 1000;
+  static int count_total = 0;
+  
   float epsilon = GetEpsilon();
   float r;
   caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
   if ( r < epsilon ) {
     return GetRandomAction();
   } else {
-    return GetActionFromNet();
+    int action = GetActionFromNet();
+    count[action]++;
+    count_total++;
+    if ( count_total == display ) {
+      count_total = 0;
+      ostringstream ss;
+      for ( int i = 0; i < legalActionCount_; ++i ) {
+        ss << "[" << i << ": " << count[i] << "] ";
+        count[i] = 0;
+      }
+      LOG(INFO) << ss.str();
+    }
+    return action;
   }
 }
 
@@ -109,7 +120,7 @@ void CustomSolver<Dtype>::FeedReward( int action, float reward ) {
 template <typename Dtype>
 State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & totalReward ) {
   int action;
-  if ( this->iter_ <= REPLAY_START_SIZE )
+  if ( this->iter_ <= learnStart_ )
     action = GetRandomAction();
   else {
     nowState.Feed( stateBlob_ );
@@ -117,7 +128,7 @@ State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & total
     action = GetAction();
   }
   float reward;
-  State<Dtype> state = environment_.Observe( action, reward, FRAME_SKIP );
+  State<Dtype> state = environment_.Observe( action, reward, frameSkip_ );
   // Clip rewards
   if ( reward > 0.0 )
     reward = 1.0;
@@ -238,40 +249,30 @@ void CustomSolver<Dtype>::Step ( int iters ) {
     ZeroGradients();
     const bool display = this->param_.display() 
       && this->iter_ % this->param_.display() == 0;
+    const bool update = this->iter_ > learnStart_
+      && this->iter_ % this->param_.iter_size() == 0;
     this->net_->set_debug_info(display && this->param_.debug_info());
     
-    // Our agent selects UPDATE_FREQUENCY actions between successive SGD update.
-    for ( int i = 0; i < UPDATE_FREQUENCY; ++i ){
-      // This happens when game-over occurs, or at the first iteration.
-      if ( !nowState.isValid() ) {
-        totalReward += episodeReward;
-        LOG(INFO) << "  Episode ends with score " << episodeReward; 
-        ++episodeCount;
-        episodeReward = 0;
-        environment_.ResetGame();
-        nowState = environment_.GetState( true );
+    // This happens when game-over occurs, or at the first iteration.
+    if ( !nowState.isValid() ) {
+      totalReward += episodeReward;
+      LOG(INFO) << "  Episode ends with score " << episodeReward; 
+      ++episodeCount;
+      episodeReward = 0;
+      environment_.ResetGame();
+      nowState = environment_.GetState( true );
+    }
+    nowState = PlayStep( nowState, episodeReward );
+    
+    if ( update ) {
+      for (int i = 0; i < this->param_.iter_size(); ++i) {
+        TrainStep();
       }
-      nowState = PlayStep( nowState, episodeReward );
+      this->ApplyUpdate();
     }
     
-    Dtype loss = 0;
-    if ( this->iter_ > REPLAY_START_SIZE )
-      for (int i = 0; i < this->param_.iter_size(); ++i) {
-        loss += TrainStep();
-      }
-    loss /= this->param_.iter_size();
-    // average the loss across iterations for smoothed reporting
-    if (losses.size() < average_loss) {
-      losses.push_back(loss);
-      int size = losses.size();
-      smoothed_loss = (smoothed_loss * (size - 1) + loss) / size;
-    } else {
-      int idx = (this->iter_ - start_iter) % average_loss;
-      smoothed_loss += (loss - losses[idx]) / average_loss;
-      losses[idx] = loss;
-    }
-    if (display) {
-      float epsilon = (this->iter_ > REPLAY_START_SIZE) ? GetEpsilon() : 1.0;
+    if ( display ) {
+      float epsilon = (this->iter_ > learnStart_) ? GetEpsilon() : 1.0;
       LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
       //LOG(INFO) << "  Average score = " << totalReward / episodeCount
       //      << " over the most recent " << episodeCount << " game(s).";
@@ -279,7 +280,6 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       totalReward = 0.0;
       episodeCount = 0;
     }
-    this->ApplyUpdate();
 
     // Increment the internal iter_ counter -- its value should always indicate
     // the number of times the weights have been updated.

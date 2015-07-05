@@ -20,6 +20,20 @@ DEFINE_string(rom, "",
 DEFINE_int32(display, 0,
     "Display ALE Viz if set non-zero.");
 
+DEFINE_double(gamma, 0.95,
+    "Discount factor used by Q value update.");
+DEFINE_double(epsilon, 0.05,
+    "Exploration used for evaluation.");
+DEFINE_int32(learn_start, 5000,
+    "Number of iteration before learn starts.");
+DEFINE_int32(history_size, 500000,
+    "Number of transitions stored in replay memory.");
+DEFINE_int32(update_freq, 4,
+    "Number of actions taken between successive SGD updates.");
+DEFINE_int32(frame_skip, 3,
+    "Number of frames skipped between successive actions.");
+
+
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.
 void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
@@ -101,7 +115,7 @@ int main( int argc, char** argv ) {
     LOG(FATAL) << "Unknown command : " << command;
   } 
   ALEInterface* ale = ale_init();
-  solver->SetALE( ale );
+  solver->InitializeALE( ale );
   
   LOG(INFO) << "Starting Optimization";
   if ( FLAGS_snapshot.size() ) {

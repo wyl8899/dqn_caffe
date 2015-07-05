@@ -7,13 +7,16 @@
 template <typename Dtype>
 class CustomTestSolver : public CustomSolver<Dtype> {
 public:
-  explicit CustomTestSolver( const SolverParameter& param );
+  explicit CustomTestSolver( const SolverParameter& param )
+    : CustomSolver<Dtype>( param ) {}
   void Solve( const char* resume_file = NULL );
   inline void Solve( const string resume_file ) {
     Solve( resume_file.c_str() ); 
   }
 protected:
-  int GetAction();
+  inline virtual float GetEpsilon() {
+    return this->epsilon_;
+  }
   State<Dtype> PlayStep( State<Dtype> nowState, float & totalReward );
 };
 
