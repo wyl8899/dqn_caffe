@@ -18,7 +18,7 @@ DEFINE_int32(iterations, 50,
 DEFINE_string(rom, "", 
     "The rom file of the game."); 
 DEFINE_int32(display, 0,
-    "Display ALE Viz if set non-zero.");
+    "Whether ALE Viz will be displayed.");
 
 DEFINE_double(gamma, 0.95,
     "Discount factor used by Q value update.");
@@ -32,7 +32,8 @@ DEFINE_int32(update_freq, 4,
     "Number of actions taken between successive SGD updates.");
 DEFINE_int32(frame_skip, 3,
     "Number of frames skipped between successive actions.");
-
+DEFINE_int32(clip_reward, 1,
+    "Whether reward will be clipped to 1, 0, or -1 according to its sign.");
 
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.

@@ -128,12 +128,7 @@ State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & total
     action = GetAction();
   }
   float reward;
-  State<Dtype> state = environment_.Observe( action, reward, frameSkip_ );
-  // Clip rewards
-  if ( reward > 0.0 )
-    reward = 1.0;
-  if ( reward < 0.0 )
-    reward = -1.0;
+  State<Dtype> state = environment_.Observe( action, &reward, frameSkip_ );
   //state.inspect( "PlayStep()" );
   //LOG(INFO) << "PlayStep : observed (action, reward) = " << action << ", " << reward;
   expHistory_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
@@ -145,13 +140,12 @@ template <typename Dtype>
 Dtype CustomSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
   float reward;
-  const float GAMMA = 0.95; 
   if ( trans.state_1.isValid() ) {
     trans.state_1.Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
     int action = GetActionFromNet();
     float pred = actionBlob_->cpu_data()[1];
-    reward = trans.reward + GAMMA * pred;
+    reward = trans.reward + gamma_ * pred;
   } else {
     reward = trans.reward;
   }

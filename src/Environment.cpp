@@ -5,11 +5,20 @@ Environment<Dtype>::Environment() {
 }
 
 template <typename Dtype>
-State<Dtype> Environment<Dtype>::Observe( int action, float & reward, int repeat ) {
+State<Dtype> Environment<Dtype>::Observe( int action, float* reward, int repeat ) {
   Action a = legal_actions_.at( action );
-  reward = 0;
-  for ( int i = 0; i < repeat; ++i )
-    reward += ale_->act( a );
+  *reward = 0.0;
+  for ( int i = 0; i < repeat; ++i ) {
+    int r = ale_->act( a );
+    // clip the reward to 1, 0, or -1 according to its sign.
+    if ( FLAGS_clip_reward ) {
+      if ( r > 0 )
+        r = 1;
+      else if ( r < 0 )
+        r = -1;
+    }
+    *reward += r;
+  }
   return GetState( false );
 }
 

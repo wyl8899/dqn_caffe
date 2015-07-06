@@ -7,7 +7,7 @@ State<Dtype> CustomTestSolver<Dtype>::PlayStep( State<Dtype> nowState, float & t
   this->net_->ForwardTo( this->lossLayerID_ - 1 );
   action = this->GetAction();
   float reward;
-  State<Dtype> state = this->environment_.Observe( action, reward, this->frameSkip_ );
+  State<Dtype> state = this->environment_.Observe( action, &reward, this->frameSkip_ );
   totalReward += reward;
   return state;
 }
