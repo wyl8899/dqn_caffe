@@ -38,7 +38,9 @@ DEFINE_int32(clip_reward, 1,
 DEFINE_int32(eval_episodes, 3,
     "Number of episodes played during evaluation.");
 DEFINE_int32(eval_freq, 10000,
-    "Number of iterations between evaluations.");
+    "Number of iterations between evaluations; 0 to disable.");
+DEFINE_int32(sync_freq, 10000,
+    "Number of iterations between target_net sync.");
 
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.

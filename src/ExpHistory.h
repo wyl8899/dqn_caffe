@@ -11,6 +11,9 @@ public:
   
   void AddExperience( Transition<Dtype> exp );
   Transition<Dtype> & Sample();
+  inline size_t size() {
+    return history_.size();
+  }
   
 private:
   vector<Transition<Dtype> > history_;

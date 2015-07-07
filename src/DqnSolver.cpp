@@ -4,14 +4,22 @@
 
 using caffe::BlobProto;
 
-#define FIND_BLOB(name) \
-  name##Blob_ = NULL; \
-  name##Blob_ = this->net_->blob_by_name(#name).get(); \
-  CHECK( name##Blob_ );
+#define GET_BLOB(dest,net,name) \
+  dest = NULL; \
+  dest = net->blob_by_name(#name).get(); \
+  CHECK( dest )
+
+#define FIND_NET_BLOB(name) \
+  GET_BLOB(name##Blob_,this->net_,name);
+
+#define FIND_TARGET_NET_BLOB(name) \
+  GET_BLOB(name##TargetBlob_,this->targetNet_,name);
 
 template <typename Dtype>
 DqnSolver<Dtype>::DqnSolver( const SolverParameter& param )
   : SGDSolver<Dtype>( param ), expHistory_( FLAGS_history_size ) {
+  InitTargetNet();
+  
   // cache information
   const vector<string> & layers = this->net_->layer_names();
   for ( int i = 0; i < layers.size(); ++i ) {
@@ -23,10 +31,12 @@ DqnSolver<Dtype>::DqnSolver( const SolverParameter& param )
   for ( int i = 0; i < blobs.size(); ++i ) {
     LOG(INFO) << "Blob #" << i << ": " << blobs[i];
   }
-  FIND_BLOB(state);
-  FIND_BLOB(reward);
-  FIND_BLOB(pred);
-  FIND_BLOB(action);
+  FIND_NET_BLOB(state);
+  FIND_NET_BLOB(reward);
+  FIND_NET_BLOB(pred);
+  FIND_NET_BLOB(action);
+  FIND_TARGET_NET_BLOB(state);
+  FIND_TARGET_NET_BLOB(action);
   
   // build blobs for update value calculation
   const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
@@ -45,15 +55,32 @@ DqnSolver<Dtype>::DqnSolver( const SolverParameter& param )
   updateFreq_ = FLAGS_update_freq;
   frameSkip_ = FLAGS_frame_skip;
   evalFreq_ = FLAGS_eval_freq;
+  syncFreq_ = FLAGS_sync_freq;
 }
 
-#undef FIND_BLOB
+template <typename Dtype>
+void DqnSolver<Dtype>::InitTargetNet() {
+  NetParameter netParam;
+  CHECK( this->param_.has_net() );
+  caffe::ReadNetParamsFromTextFileOrDie( this->param_.net(), &netParam );
+  targetNet_.reset( new Net<Dtype>( netParam ) );
+}
 
 template <typename Dtype>
-void DqnSolver<Dtype>::FeedState() {
-  const vector<Blob<Dtype>*> & inputs = this->net_->input_blobs();
-  Dtype* data = inputs[0]->mutable_cpu_data();
-  *data = static_cast<Dtype>(1);
+void DqnSolver<Dtype>::SyncTargetNet() {
+  typedef shared_ptr<Layer<Dtype> > spLayer;
+  typedef shared_ptr<Blob<Dtype> > spBlob;
+  const vector<spLayer>& targetLayers = targetNet_->layers();
+  const vector<spLayer>& sourceLayers = this->net_->layers();
+  const int count = sourceLayers.size();
+  for ( int i = 0; i < count; ++i ) {
+    vector<spBlob>& sourceBlobs = sourceLayers[i]->blobs();
+    vector<spBlob>& targetBlobs = targetLayers[i]->blobs();
+    for ( int j = 0; j < sourceBlobs.size(); ++j ) {
+      const bool reshape = false;
+      targetBlobs[j]->CopyFrom( *sourceBlobs[j], false, reshape );
+    }
+  }
 }
 
 template <typename Dtype>
@@ -106,10 +133,12 @@ int DqnSolver<Dtype>::GetAction( float epsilon ) {
 template <typename Dtype>
 void DqnSolver<Dtype>::FeedReward( int action, float reward ) {
   const Dtype* pred = predBlob_->cpu_data();
-  rewardBlob_->CopyFrom( *predBlob_, false, true );
+  const bool reshape = true;
+  rewardBlob_->CopyFrom( *predBlob_, false, reshape );
   Dtype* rewardData = rewardBlob_->mutable_cpu_data();
   Dtype actionPred = pred[action];
   float delta = reward - actionPred;
+  // clip error
   if ( delta > 1.0 )
     delta = 1.0;
   if ( delta < -1.0 )
@@ -243,6 +272,7 @@ void DqnSolver<Dtype>::Step ( int iters ) {
     const bool update = this->iter_ > learnStart_
       && this->iter_ % updateFreq_ == 0;
     const bool eval = evalFreq_ && this->iter_ % evalFreq_ == 0;
+    const bool sync = this->iter_ % syncFreq_ == 0;
     this->net_->set_debug_info(display && this->param_.debug_info());
     
     // This happens when game-over occurs, or at the first iteration.
@@ -258,11 +288,12 @@ void DqnSolver<Dtype>::Step ( int iters ) {
       }
       this->ApplyUpdate();
     }
-    
+    if ( sync ) {
+      SyncTargetNet();
+    }
     if ( eval ) {
       Evaluate();
     }
-    
     if ( display ) {
       float epsilon = (this->iter_ > learnStart_) ? GetEpsilon() : 1.0;
       LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
@@ -311,6 +342,23 @@ void DqnSolver<Dtype>::Solve( const char* resume_file ) {
     this->TestAll();
   }
   LOG(INFO) << "Optimization Done.";
+}
+
+template <typename Dtype>
+void DqnSolver<Dtype>::Evaluate() {
+  const int count = FLAGS_eval_episodes;
+  float reward = 0.0;
+  State<Dtype> state;
+  for ( int i = 0; i < count; ++i ) {
+    environment_.ResetGame();
+    state = environment_.GetState( true );
+    while ( state.isValid() ) {
+      state = PlayStep( state, &reward, epsilon_ );
+    }
+    // reward is accumulated to calculate average directly
+  }
+  LOG(INFO) << "Evaluate: Average score = " << reward / count
+    << " over " << count << " game(s).";
 }
 
 

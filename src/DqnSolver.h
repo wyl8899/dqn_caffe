@@ -7,6 +7,8 @@
 #include "Transition.h"
 #include "ExpHistory.h"
 
+#include "caffe/util/upgrade_proto.hpp"
+
 DECLARE_double(gamma);
 DECLARE_double(epsilon);
 DECLARE_int32(learn_start);
@@ -15,8 +17,10 @@ DECLARE_int32(update_freq);
 DECLARE_int32(frame_skip);
 DECLARE_int32(eval_episodes);
 DECLARE_int32(eval_freq);
+DECLARE_int32(sync_freq);
 
 using caffe::SolverState;
+using caffe::NetParameter;
 
 template <typename Dtype>
 class DqnSolver : public SGDSolver<Dtype> {
@@ -25,7 +29,7 @@ public:
   void Solve( const char* resume_file = NULL );
   inline void Solve( const string resume_file ) {
     Solve( resume_file.c_str() ); 
-  }
+  } 
   inline void InitializeALE( ALEInterface* ale ) {
     environment_.SetALE( ale );
     legalActionCount_ = environment_.GetLegalActionCount();
@@ -37,21 +41,7 @@ public:
          "legal actions";
   }
   
-  void Evaluate() {
-    const int count = FLAGS_eval_episodes;
-    float reward = 0.0;
-    State<Dtype> state;
-    for ( int i = 0; i < count; ++i ) {
-      environment_.ResetGame();
-      state = environment_.GetState( true );
-      while ( state.isValid() ) {
-        state = PlayStep( state, &reward, epsilon_ );
-      }
-      // reward is accumulated to calculate average directly
-    }
-    LOG(INFO) << "Evaluate: Average score = " << reward / count
-      << " over " << count << " game(s).";
-  }
+  void Evaluate();
   
 protected:
   // predefined hyperparameters
@@ -61,23 +51,30 @@ protected:
   int updateFreq_;  // actions between successive update
   int frameSkip_;   // frames between successive actions
   int evalFreq_;    // iterations between evaluations
+  int syncFreq_;    // iterations between target_net sync
 
   ExpHistory<Dtype> expHistory_;
   Environment<Dtype> environment_;
   
+  // a separate net, termed target_net, is used to calculate target update value
+  // the target_net is synced with the training net every syncFreq_ iterations.
+  shared_ptr<Net<Dtype> > targetNet_;
+  
   // cached information and pointers  
   int lossLayerID_;
-  Blob<Dtype> *stateBlob_;
-  Blob<Dtype> *rewardBlob_;
-  Blob<Dtype> *predBlob_;
-  Blob<Dtype> *actionBlob_;
+  
+  typedef Blob<Dtype>* pBlob;
+  pBlob stateBlob_, rewardBlob_, predBlob_, actionBlob_;
+  pBlob stateTargetBlob_, actionTargetBlob_;
   
   int legalActionCount_;
   
   // running average of (dL / dw)^2 and tmp for calculation
   vector<shared_ptr<Blob<Dtype> > > sqGrad_, tmpGrad_;
   
-  void FeedState();
+  void InitTargetNet();
+  void SyncTargetNet();
+  
   void FeedReward( int action, float reward );
   
   virtual float GetEpsilon();
