@@ -5,12 +5,12 @@ lr_policy: "fixed"
 
 momentum: 0.95
 
-display: 200
+display: 2500
 
-iter_size: 16
+iter_size: 32
 
-snapshot: 10000
+snapshot: 25000
 
-max_iter: 250000
+max_iter: 10000000
 
 solver_mode: CPU

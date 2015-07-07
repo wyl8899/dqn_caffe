@@ -169,10 +169,10 @@ Dtype DqnSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
   float reward;
   if ( trans.state_1.isValid() ) {
-    trans.state_1.Feed( stateBlob_ );
+    trans.state_1.Feed( stateTargetBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
     int action = GetActionFromNet();
-    float pred = actionBlob_->cpu_data()[1];
+    float pred = actionTargetBlob_->cpu_data()[1];
     reward = trans.reward + gamma_ * pred;
   } else {
     reward = trans.reward;
