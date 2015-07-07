@@ -21,23 +21,23 @@ DEFINE_string(rom, "",
 DEFINE_int32(display, 0,
     "Whether ALE Viz will be displayed.");
 
-DEFINE_double(gamma, 0.95,
+DEFINE_double(gamma, 0.99,
     "Discount factor used by Q value update.");
 DEFINE_double(epsilon, 0.05,
     "Exploration used for evaluation.");
-DEFINE_int32(learn_start, 5000,
+DEFINE_int32(learn_start, 50000,
     "Number of iteration before learn starts.");
-DEFINE_int32(history_size, 500000,
+DEFINE_int32(history_size, 1000000,
     "Number of transitions stored in replay memory.");
 DEFINE_int32(update_freq, 4,
     "Number of actions taken between successive SGD updates.");
-DEFINE_int32(frame_skip, 3,
+DEFINE_int32(frame_skip, 4,
     "Number of frames skipped between action selections.");
 DEFINE_int32(clip_reward, 1,
     "Whether reward will be clipped to 1, 0, or -1 according to its sign.");
 DEFINE_int32(eval_episodes, 3,
     "Number of episodes played during evaluation.");
-DEFINE_int32(eval_freq, 20000,
+DEFINE_int32(eval_freq, 10000,
     "Number of iterations between evaluations.");
 
 // Load the weights from the specified caffemodel(s) into the train and
@@ -129,10 +129,10 @@ void Test( shared_ptr<DQN> solver ) {
 }
 
 int main( int argc, char** argv ) {
+  string command( argv[1] );
   shared_ptr<DQN> solver = caffe_init( argc, argv );
   ALEInterface* ale = ale_init();
   solver->InitializeALE( ale );
-  string command( argv[1] );
   if ( command == "train" ) {
     Train( solver );
   } else if ( command == "test" ) {
