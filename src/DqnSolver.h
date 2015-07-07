@@ -1,5 +1,5 @@
-#ifndef __CUSTOM_SOLVER_H__
-#define __CUSTOM_SOLVER_H__
+#ifndef __DQN_SOLVER_H__
+#define __DQN_SOLVER_H__
 
 #include "CommonIncludes.h"
 #include "State.h"
@@ -13,13 +13,15 @@ DECLARE_int32(learn_start);
 DECLARE_int32(history_size);
 DECLARE_int32(update_freq);
 DECLARE_int32(frame_skip);
+DECLARE_int32(eval_episodes);
+DECLARE_int32(eval_freq);
 
 using caffe::SolverState;
 
 template <typename Dtype>
-class CustomSolver : public SGDSolver<Dtype> {
+class DqnSolver : public SGDSolver<Dtype> {
 public:
-  explicit CustomSolver( const SolverParameter& param );
+  explicit DqnSolver( const SolverParameter& param );
   void Solve( const char* resume_file = NULL );
   inline void Solve( const string resume_file ) {
     Solve( resume_file.c_str() ); 
@@ -34,13 +36,31 @@ public:
       << "Size of input blob \"reward\" should equal the number of "
          "legal actions";
   }
-protected:  
+  
+  void Evaluate() {
+    const int count = FLAGS_eval_episodes;
+    float reward = 0.0;
+    State<Dtype> state;
+    for ( int i = 0; i < count; ++i ) {
+      environment_.ResetGame();
+      state = environment_.GetState( true );
+      while ( state.isValid() ) {
+        state = PlayStep( state, &reward, epsilon_ );
+      }
+      // reward is accumulated to calculate average directly
+    }
+    LOG(INFO) << "Evaluate: Average score = " << reward / count
+      << " over " << count << " game(s).";
+  }
+  
+protected:
   // predefined hyperparameters
   float gamma_;     // discount factor
   float epsilon_;   // exploration used in evaluation
   int learnStart_;  // iterations before learning starts
   int updateFreq_;  // actions between successive update
   int frameSkip_;   // frames between successive actions
+  int evalFreq_;    // iterations between evaluations
 
   ExpHistory<Dtype> expHistory_;
   Environment<Dtype> environment_;
@@ -65,10 +85,10 @@ protected:
   inline int GetRandomAction() {
     return rand() % legalActionCount_;
   }
-  int GetAction();
+  int GetAction( float epsilon );
   
   void Step( int );
-  State<Dtype> PlayStep( State<Dtype> state, float & totalReward );
+  State<Dtype> PlayStep( State<Dtype> state, float* totalReward, float epsilon );
   Dtype TrainStep();
   
   void ZeroGradients();
@@ -79,4 +99,4 @@ protected:
   virtual void RestoreSolverState( const SolverState & state );
 };
 
-#endif // __CUSTOM_SOLVER_H__
+#endif // __DQN_SOLVER_H__

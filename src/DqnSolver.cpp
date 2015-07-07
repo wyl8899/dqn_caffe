@@ -1,4 +1,4 @@
-#include "CustomSolver.h"
+#include "DqnSolver.h"
 
 #include <cmath> // for sqrt
 
@@ -10,7 +10,7 @@ using caffe::BlobProto;
   CHECK( name##Blob_ );
 
 template <typename Dtype>
-CustomSolver<Dtype>::CustomSolver( const SolverParameter& param )
+DqnSolver<Dtype>::DqnSolver( const SolverParameter& param )
   : SGDSolver<Dtype>( param ), expHistory_( FLAGS_history_size ) {
   // cache information
   const vector<string> & layers = this->net_->layer_names();
@@ -44,25 +44,26 @@ CustomSolver<Dtype>::CustomSolver( const SolverParameter& param )
   learnStart_ = FLAGS_learn_start;
   updateFreq_ = FLAGS_update_freq;
   frameSkip_ = FLAGS_frame_skip;
+  evalFreq_ = FLAGS_eval_freq;
 }
 
 #undef FIND_BLOB
 
 template <typename Dtype>
-void CustomSolver<Dtype>::FeedState() {
+void DqnSolver<Dtype>::FeedState() {
   const vector<Blob<Dtype>*> & inputs = this->net_->input_blobs();
   Dtype* data = inputs[0]->mutable_cpu_data();
   *data = static_cast<Dtype>(1);
 }
 
 template <typename Dtype>
-int CustomSolver<Dtype>::GetActionFromNet() {
+int DqnSolver<Dtype>::GetActionFromNet() {
   int action = actionBlob_->cpu_data()[0];
   return action;
 }
 
 template <typename Dtype>
-float CustomSolver<Dtype>::GetEpsilon() {
+float DqnSolver<Dtype>::GetEpsilon() {
   const float INITIAL_EPSILON = 1.0;
   const float FINAL_EPSILON = 0.1;
   const int FINAL_FRAME = 1000000; 
@@ -76,12 +77,11 @@ float CustomSolver<Dtype>::GetEpsilon() {
 }
 
 template <typename Dtype>
-int CustomSolver<Dtype>::GetAction() {
+int DqnSolver<Dtype>::GetAction( float epsilon ) {
   static int count[18] = {0};
   static const int display = 1000;
   static int count_total = 0;
   
-  float epsilon = GetEpsilon();
   float r;
   caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
   if ( r < epsilon ) {
@@ -104,7 +104,7 @@ int CustomSolver<Dtype>::GetAction() {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::FeedReward( int action, float reward ) {
+void DqnSolver<Dtype>::FeedReward( int action, float reward ) {
   const Dtype* pred = predBlob_->cpu_data();
   rewardBlob_->CopyFrom( *predBlob_, false, true );
   Dtype* rewardData = rewardBlob_->mutable_cpu_data();
@@ -118,26 +118,25 @@ void CustomSolver<Dtype>::FeedReward( int action, float reward ) {
 }
 
 template <typename Dtype>
-State<Dtype> CustomSolver<Dtype>::PlayStep( State<Dtype> nowState, float & totalReward ) {
+State<Dtype> DqnSolver<Dtype>::PlayStep( State<Dtype> nowState, float* totalReward, float epsilon ) {
   int action;
   if ( this->iter_ <= learnStart_ )
     action = GetRandomAction();
   else {
     nowState.Feed( stateBlob_ );
     this->net_->ForwardTo( lossLayerID_ - 1 );
-    action = GetAction();
+    action = GetAction( epsilon );
   }
   float reward;
   State<Dtype> state = environment_.Observe( action, &reward, frameSkip_ );
-  //state.inspect( "PlayStep()" );
-  //LOG(INFO) << "PlayStep : observed (action, reward) = " << action << ", " << reward;
   expHistory_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
-  totalReward += reward;
+  if ( totalReward )
+    *totalReward += reward;
   return state;
 }
 
 template <typename Dtype>
-Dtype CustomSolver<Dtype>::TrainStep() {
+Dtype DqnSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
   float reward;
   if ( trans.state_1.isValid() ) {
@@ -158,7 +157,7 @@ Dtype CustomSolver<Dtype>::TrainStep() {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::ApplyUpdate() {
+void DqnSolver<Dtype>::ApplyUpdate() {
   Dtype rate = this->GetLearningRate();
   this->ClipGradients();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
@@ -170,7 +169,7 @@ void CustomSolver<Dtype>::ApplyUpdate() {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
+void DqnSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
   const vector<shared_ptr<Blob<Dtype> > >& net_params = this->net_->params();
   const vector<float>& net_params_lr = this->net_->params_lr();
   const Dtype momentum = this->param_.momentum();
@@ -206,7 +205,7 @@ void CustomSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::ZeroGradients() {
+void DqnSolver<Dtype>::ZeroGradients() {
   // zero-init the params
   for (int i = 0; i < this->net_->params().size(); ++i) {
     shared_ptr<Blob<Dtype> > blob = this->net_->params()[i];
@@ -228,7 +227,7 @@ void CustomSolver<Dtype>::ZeroGradients() {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::Step ( int iters ) {
+void DqnSolver<Dtype>::Step ( int iters ) {
   vector<Blob<Dtype>*> bottom_vec;
   const int start_iter = this->iter_;
   const int stop_iter = this->iter_ + iters;
@@ -236,27 +235,22 @@ void CustomSolver<Dtype>::Step ( int iters ) {
   vector<Dtype> losses;
   Dtype smoothed_loss = 0;
   State<Dtype> nowState;
-  float episodeReward = 0.0, totalReward = 0.0;
-  int episodeCount = 0;
 
   while (this->iter_ < stop_iter) {
     ZeroGradients();
     const bool display = this->param_.display() 
       && this->iter_ % this->param_.display() == 0;
     const bool update = this->iter_ > learnStart_
-      && this->iter_ % this->param_.iter_size() == 0;
+      && this->iter_ % updateFreq_ == 0;
+    const bool eval = evalFreq_ && this->iter_ % evalFreq_ == 0;
     this->net_->set_debug_info(display && this->param_.debug_info());
     
     // This happens when game-over occurs, or at the first iteration.
     if ( !nowState.isValid() ) {
-      totalReward += episodeReward;
-      LOG(INFO) << "  Episode ends with score " << episodeReward; 
-      ++episodeCount;
-      episodeReward = 0;
       environment_.ResetGame();
       nowState = environment_.GetState( true );
     }
-    nowState = PlayStep( nowState, episodeReward );
+    nowState = PlayStep( nowState, NULL, GetEpsilon() );
     
     if ( update ) {
       for (int i = 0; i < this->param_.iter_size(); ++i) {
@@ -265,21 +259,18 @@ void CustomSolver<Dtype>::Step ( int iters ) {
       this->ApplyUpdate();
     }
     
+    if ( eval ) {
+      Evaluate();
+    }
+    
     if ( display ) {
       float epsilon = (this->iter_ > learnStart_) ? GetEpsilon() : 1.0;
       LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
-      //LOG(INFO) << "  Average score = " << totalReward / episodeCount
-      //      << " over the most recent " << episodeCount << " game(s).";
       LOG(INFO) << "  Average Q value = " << predBlob_->asum_data() / legalActionCount_;
-      totalReward = 0.0;
-      episodeCount = 0;
     }
 
-    // Increment the internal iter_ counter -- its value should always indicate
-    // the number of times the weights have been updated.
     ++this->iter_;
 
-    // Save a snapshot if needed.
     if (this->param_.snapshot() 
         && this->iter_ % this->param_.snapshot() == 0) {
       this->Snapshot();
@@ -288,8 +279,8 @@ void CustomSolver<Dtype>::Step ( int iters ) {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::Solve( const char* resume_file ) {
-  LOG(INFO) << "CustomSolver : Solving " << this->net_->name();
+void DqnSolver<Dtype>::Solve( const char* resume_file ) {
+  LOG(INFO) << "DqnSolver : Solving " << this->net_->name();
   LOG(INFO) << "Learning Rate Policy: " << this->param_.lr_policy();
 
   if (resume_file) {
@@ -324,7 +315,7 @@ void CustomSolver<Dtype>::Solve( const char* resume_file ) {
 
 
 template <typename Dtype>
-void CustomSolver<Dtype>::SnapshotSolverState(SolverState* state) {
+void DqnSolver<Dtype>::SnapshotSolverState(SolverState* state) {
   state->clear_history();
   for ( int i = 0; i < this->history_.size(); ++i ) {
     // Add gradient history
@@ -339,14 +330,14 @@ void CustomSolver<Dtype>::SnapshotSolverState(SolverState* state) {
 }
 
 template <typename Dtype>
-void CustomSolver<Dtype>::RestoreSolverState(const SolverState& state) {
+void DqnSolver<Dtype>::RestoreSolverState(const SolverState& state) {
   CHECK_EQ( state.history_size(), this->history_.size() + sqGrad_.size() )
       << "Incorrect length of history blobs.";
-  LOG(INFO) << "CustomSolver: restoring history";
+  LOG(INFO) << "DqnSolver: restoring history";
   for ( int i = 0; i < this->history_.size(); ++i ) {
     this->history_[i]->FromProto( state.history( i ) );
     sqGrad_[i]->FromProto( state.history( i + this->history_.size() ) );
   }
 }
 
-INSTANTIATE_CLASS(CustomSolver);
+INSTANTIATE_CLASS(DqnSolver);

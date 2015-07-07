@@ -1,6 +1,7 @@
 #include "CommonIncludes.h"
-#include "CustomSolver.h"
-#include "CustomTestSolver.h"
+#include "DqnSolver.h"
+
+typedef DqnSolver<float> DQN;
 
 DEFINE_int32(gpu, -1,
     "Run in GPU mode on given device ID.");
@@ -31,9 +32,13 @@ DEFINE_int32(history_size, 500000,
 DEFINE_int32(update_freq, 4,
     "Number of actions taken between successive SGD updates.");
 DEFINE_int32(frame_skip, 3,
-    "Number of frames skipped between successive actions.");
+    "Number of frames skipped between action selections.");
 DEFINE_int32(clip_reward, 1,
     "Whether reward will be clipped to 1, 0, or -1 according to its sign.");
+DEFINE_int32(eval_episodes, 3,
+    "Number of episodes played during evaluation.");
+DEFINE_int32(eval_freq, 20000,
+    "Number of iterations between evaluations.");
 
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.
@@ -49,8 +54,7 @@ void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
   }
 }
 
-template <class T>
-shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
+shared_ptr<DQN> caffe_init( int argc, char** argv) {
   // Print output to stderr (while still logging).
   FLAGS_alsologtostderr = 1;
   caffe::GlobalInit(&argc, &argv);
@@ -79,8 +83,7 @@ shared_ptr<CustomSolver<float> > caffe_init( int argc, char** argv) {
     Caffe::set_mode(Caffe::CPU);
   }
   
-  shared_ptr<CustomSolver<float> >
-    solver(new T(solver_param));
+  shared_ptr<DQN> solver( new DQN( solver_param ) );
     
   return solver;
 }
@@ -100,28 +103,11 @@ ALEInterface* ale_init() {
   return &ale;
 }
 
-int main( int argc, char** argv ) {
-  shared_ptr<CustomSolver<float> > solver;
-  string command( argv[1] );
-  if ( command == "train" ) {
-    solver = caffe_init<CustomSolver<float> >( argc, argv );
-  } else if ( command == "test" ) {
-    solver = caffe_init<CustomTestSolver<float> >( argc, argv );
-    CHECK_GT( FLAGS_snapshot.size(), 0 );
-  } else {
-    LOG(ERROR) << "usage: dqn <command> <args>\n\n"
-      "commands:\n"
-      "  train           train or finetune a model\n"
-      "  test            score a model\n";
-    LOG(FATAL) << "Unknown command : " << command;
-  } 
-  ALEInterface* ale = ale_init();
-  solver->InitializeALE( ale );
-  
+void Train( shared_ptr<DQN> solver ) {
   LOG(INFO) << "Starting Optimization";
   if ( FLAGS_snapshot.size() ) {
-    LOG(INFO) << "Resuming from " << FLAGS_snapshot;
-    solver->Solve( FLAGS_snapshot );
+    LOG(FATAL) << "Restore from snapshot disabled "
+      "due to the use of experience replay.";
   } else if ( FLAGS_weights.size() ) {
     CopyLayers( &*solver, FLAGS_weights );
     solver->Solve();
@@ -129,6 +115,34 @@ int main( int argc, char** argv ) {
     solver->Solve();
   }
   LOG(INFO) << "Optimization Done.";
-  
+}
+
+void Test( shared_ptr<DQN> solver ) {
+  string snapshot = FLAGS_snapshot;
+  if ( snapshot.size() == 0 ) {
+    LOG(FATAL) << "Needs a snapshot to evaluate.";
+  } else {
+    LOG(INFO) << "Restoring previous solver status from " << snapshot;
+    solver->Restore( snapshot.c_str() );
+    solver->Evaluate();
+  }
+}
+
+int main( int argc, char** argv ) {
+  shared_ptr<DQN> solver = caffe_init( argc, argv );
+  ALEInterface* ale = ale_init();
+  solver->InitializeALE( ale );
+  string command( argv[1] );
+  if ( command == "train" ) {
+    Train( solver );
+  } else if ( command == "test" ) {
+    Test( solver );
+  } else {
+    LOG(ERROR) << "usage: dqn <command> <args>\n\n"
+      "commands:\n"
+      "  train           train or finetune a model\n"
+      "  test            score a model\n";
+    LOG(FATAL) << "Unknown command : " << command;
+  }
   return 0;
 }
