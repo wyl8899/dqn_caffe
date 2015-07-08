@@ -41,6 +41,8 @@ DEFINE_int32(eval_freq, 10000,
     "Number of iterations between evaluations; 0 to disable.");
 DEFINE_int32(sync_freq, 10000,
     "Number of iterations between target_net sync.");
+DEFINE_int32(normalize, 0,
+    "Whether normalize the gradient, i.e. divide diff by batch size.");
 
 // Load the weights from the specified caffemodel(s) into the train and
 // test nets.

@@ -18,6 +18,7 @@ DECLARE_int32(frame_skip);
 DECLARE_int32(eval_episodes);
 DECLARE_int32(eval_freq);
 DECLARE_int32(sync_freq);
+DECLARE_int32(normalize);
 
 using caffe::SolverState;
 using caffe::NetParameter;

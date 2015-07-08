@@ -170,8 +170,7 @@ Dtype DqnSolver<Dtype>::TrainStep() {
   float reward;
   if ( trans.state_1.isValid() ) {
     trans.state_1.Feed( stateTargetBlob_ );
-    this->net_->ForwardTo( lossLayerID_ - 1 );
-    int action = GetActionFromNet();
+    this->targetNet_->ForwardTo( lossLayerID_ - 1 );
     float pred = actionTargetBlob_->cpu_data()[1];
     reward = trans.reward + gamma_ * pred;
   } else {
@@ -190,7 +189,8 @@ void DqnSolver<Dtype>::ApplyUpdate() {
   Dtype rate = this->GetLearningRate();
   this->ClipGradients();
   for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
-    this->Normalize(param_id);
+    if ( FLAGS_normalize )
+      this->Normalize(param_id);
     this->Regularize(param_id);
     ComputeUpdateValue(param_id, rate);
   }
