@@ -217,12 +217,17 @@ void DqnSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
       tmp->mutable_cpu_data() );
     caffe::caffe_cpu_axpby( count, momentumC, tmp->cpu_data(),
       momentum, g2->mutable_cpu_data() );
+    caffe::caffe_mul( count, g->cpu_data(), g->cpu_data(),
+      tmp->mutable_cpu_data() );
+    caffe::caffe_cpu_axpby( count, Dtype(1), g2->cpu_data(),
+      Dtype(-1), tmp->mutable_cpu_data() );
+    caffe::caffe_add_scalar( count, Dtype(0.01), tmp->mutable_cpu_data() );
     for ( int i = 0; i < count; ++i ) {
-      Dtype t = g2->cpu_data()[i];
-      Dtype & diff = dw->mutable_cpu_diff()[i];
-      t = sqrt( t ) + Dtype(0.01);
-      diff = diff * local_rate / t;
+      Dtype t = tmp->cpu_data()[i];
+      Dtype& diff = dw->mutable_cpu_diff()[i];
+      diff = diff / sqrt( t );
     }
+    caffe::caffe_scal( count, local_rate, dw->mutable_cpu_diff() );
     break;
   }
   case Caffe::GPU: {
