@@ -266,7 +266,6 @@ void DqnSolver<Dtype>::Step ( int iters ) {
   State<Dtype> nowState;
 
   while (this->iter_ < stop_iter) {
-    ZeroGradients();
     const bool display = this->param_.display() 
       && this->iter_ % this->param_.display() == 0;
     const bool update = this->iter_ > learnStart_
@@ -274,7 +273,7 @@ void DqnSolver<Dtype>::Step ( int iters ) {
     const bool eval = evalFreq_ && this->iter_ % evalFreq_ == 0;
     const bool sync = this->iter_ % syncFreq_ == 0;
     this->net_->set_debug_info(display && this->param_.debug_info());
-    
+   
     // This happens when game-over occurs, or at the first iteration.
     if ( !nowState.isValid() ) {
       environment_.ResetGame();
@@ -283,6 +282,7 @@ void DqnSolver<Dtype>::Step ( int iters ) {
     nowState = PlayStep( nowState, NULL, GetEpsilon() );
     
     if ( update ) {
+      ZeroGradients();
       for (int i = 0; i < this->param_.iter_size(); ++i) {
         TrainStep();
       }
@@ -347,20 +347,21 @@ void DqnSolver<Dtype>::Solve( const char* resume_file ) {
 template <typename Dtype>
 void DqnSolver<Dtype>::Evaluate() {
   const int count = FLAGS_eval_episodes;
-  float reward = 0.0;
+  float totalReward = 0.0;
   State<Dtype> state;
   for ( int i = 0; i < count; ++i ) {
+    float reward = 0.0;
     environment_.ResetGame();
     state = environment_.GetState( true );
     while ( state.isValid() ) {
       state = PlayStep( state, &reward, epsilon_ );
     }
-    // reward is accumulated to calculate average directly
+    LOG(INFO) << "    Evaluate: Episode #" << i << " ends with score " << reward;
+    totalReward += reward;
   }
-  LOG(INFO) << "Evaluate: Average score = " << reward / count
+  LOG(INFO) << "  Evaluate: Average score = " << totalReward / count
     << " over " << count << " game(s).";
 }
-
 
 template <typename Dtype>
 void DqnSolver<Dtype>::SnapshotSolverState(SolverState* state) {
