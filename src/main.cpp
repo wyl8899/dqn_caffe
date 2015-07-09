@@ -35,10 +35,10 @@ DEFINE_int32(frame_skip, 4,
     "Number of frames skipped between action selections.");
 DEFINE_int32(clip_reward, 1,
     "Whether reward will be clipped to 1, 0, or -1 according to its sign.");
-DEFINE_int32(eval_episodes, 3,
+DEFINE_int32(eval_episodes, 6,
     "Number of episodes played during evaluation.");
-DEFINE_int32(eval_freq, 10000,
-    "Number of iterations between evaluations; 0 to disable.");
+DEFINE_int32(eval_freq, 50,
+    "Number of training episodes between evaluations; 0 to disable.");
 DEFINE_int32(sync_freq, 10000,
     "Number of iterations between target_net sync.");
 DEFINE_int32(normalize, 0,

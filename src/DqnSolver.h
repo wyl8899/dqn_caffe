@@ -40,6 +40,9 @@ public:
     CHECK_EQ( legalActionCount_, rewardBlob_->count() )
       << "Size of input blob \"reward\" should equal the number of "
          "legal actions";
+    // for debugging
+    actionLog_.size = legalActionCount_;
+    actionLog_.env = &environment_;
   }
   
   void Evaluate();
@@ -83,11 +86,12 @@ protected:
   inline int GetRandomAction() {
     return rand() % legalActionCount_;
   }
-  int GetAction( float epsilon );
+  int GetAction( State<Dtype> state, float epsilon );
   
-  void Step( int );
+  // do SGD updates only if `learn` set
+  float PlayEpisode( bool learn, float epsilon );
   State<Dtype> PlayStep( State<Dtype> state, float* totalReward, float epsilon );
-  Dtype TrainStep();
+  void TrainStep();
   
   void ZeroGradients();
   void ApplyUpdate();
@@ -95,6 +99,30 @@ protected:
   
   virtual void SnapshotSolverState( SolverState* state );
   virtual void RestoreSolverState( const SolverState & state );
+
+private:
+  // For debugging
+  struct ActionLog {
+    int size;
+    Environment<Dtype>* env;
+    int count[18];
+    void Clear() {
+      memset( count, 0, sizeof( int ) * size );
+    }
+    void Add( int action ) {
+      ++count[action];
+    }
+    void Report() {
+      ostringstream ss;
+      for ( int i = 0; i < size; ++i ) {
+        string op = env->ActionToString( i );
+        ss << "[" << op << ": " << count[i] << "] ";
+      }
+      LOG(INFO) << ss.str();
+    }
+  };
+  
+  ActionLog actionLog_;
 };
 
 #endif // __DQN_SOLVER_H__

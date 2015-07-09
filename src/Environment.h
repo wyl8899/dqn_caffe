@@ -34,6 +34,13 @@ public:
   inline void ResetGame() {
     ale_->reset_game();
   }
+  inline string ActionToString( int action ) {
+    Action a = legal_actions_.at( action );
+    string s = action_to_string( a );
+    // Throw away the prefix "PLAYER_A_"
+    s = s.substr( 9 );
+    return s;
+  }
 protected:
   // extract gray scale and store it into gray_scale_[]
   void GetFrameGrayScale( pixel_t* pixels );

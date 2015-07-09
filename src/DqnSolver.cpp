@@ -85,18 +85,14 @@ void DqnSolver<Dtype>::SyncTargetNet() {
 }
 
 template <typename Dtype>
-int DqnSolver<Dtype>::GetActionFromNet() {
-  int action = actionBlob_->cpu_data()[0];
-  return action;
-}
-
-template <typename Dtype>
 float DqnSolver<Dtype>::GetEpsilon() {
   const float INITIAL_EPSILON = 1.0;
   const float FINAL_EPSILON = 0.1;
   const int FINAL_FRAME = 1000000; 
   float epsilon;
-  if ( this->iter_ > FINAL_FRAME )
+  if ( this->iter_ <= learnStart_)
+    epsilon = 1.0;
+  else if ( this->iter_ > FINAL_FRAME )
     epsilon = FINAL_EPSILON;
   else
     epsilon = INITIAL_EPSILON - 
@@ -105,28 +101,16 @@ float DqnSolver<Dtype>::GetEpsilon() {
 }
 
 template <typename Dtype>
-int DqnSolver<Dtype>::GetAction( float epsilon ) {
-  static int count[18] = {0};
-  static const int display = 1000;
-  static int count_total = 0;
-  
+int DqnSolver<Dtype>::GetAction( State<Dtype> state, float epsilon ) {
   float r;
   caffe::caffe_rng_uniform(1, 0.0f, 1.0f, &r);
   if ( r < epsilon ) {
     return GetRandomAction();
   } else {
-    int action = GetActionFromNet();
-    count[action]++;
-    count_total++;
-    if ( count_total == display ) {
-      count_total = 0;
-      ostringstream ss;
-      for ( int i = 0; i < legalActionCount_; ++i ) {
-        ss << "[" << i << ": " << count[i] << "] ";
-        count[i] = 0;
-      }
-      LOG(INFO) << ss.str();
-    }
+    state.Feed( stateBlob_ );
+    this->net_->ForwardTo( lossLayerID_ - 1 );
+    int action = actionBlob_->cpu_data()[0];
+    actionLog_.Add( action );
     return action;
   }
 }
@@ -153,9 +137,7 @@ State<Dtype> DqnSolver<Dtype>::PlayStep( State<Dtype> nowState, float* totalRewa
   if ( this->iter_ <= learnStart_ )
     action = GetRandomAction();
   else {
-    nowState.Feed( stateBlob_ );
-    this->net_->ForwardTo( lossLayerID_ - 1 );
-    action = GetAction( epsilon );
+    action = GetAction( nowState, epsilon );
   }
   float reward;
   State<Dtype> state = environment_.Observe( action, &reward, frameSkip_ );
@@ -166,34 +148,37 @@ State<Dtype> DqnSolver<Dtype>::PlayStep( State<Dtype> nowState, float* totalRewa
 }
 
 template <typename Dtype>
-Dtype DqnSolver<Dtype>::TrainStep() {
+void DqnSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
   float reward;
+  // for transition (s, a, r, s'):
+  //   expected_reward = r, if s' is terminal
+  //   expected_reward = r + gamma * max(a'){target_Q(s', a')}, otherwise
   if ( trans.state_1.isValid() ) {
     trans.state_1.Feed( stateTargetBlob_ );
-    this->targetNet_->ForwardTo( lossLayerID_ - 1 );
+    targetNet_->ForwardTo( lossLayerID_ - 1 );
     float pred = actionTargetBlob_->cpu_data()[1];
     reward = trans.reward + gamma_ * pred;
   } else {
     reward = trans.reward;
   }
+  // accumulate the gradient of Loss = (expected_reward - Q(s, a))^2
   trans.state_0.Feed( stateBlob_ );
+  this->net_->ForwardTo( lossLayerID_ - 1 );
   FeedReward( trans.action, reward );
-  Dtype loss;
-  this->net_->ForwardPrefilled( &loss );
+  this->net_->ForwardFrom( lossLayerID_ );
   this->net_->Backward();
-  return loss;
 }
 
 template <typename Dtype>
 void DqnSolver<Dtype>::ApplyUpdate() {
   Dtype rate = this->GetLearningRate();
   this->ClipGradients();
-  for (int param_id = 0; param_id < this->net_->params().size(); ++param_id) {
+  for ( int param_id = 0; param_id < this->net_->params().size(); ++param_id ) {
     if ( FLAGS_normalize )
-      this->Normalize(param_id);
-    this->Regularize(param_id);
-    ComputeUpdateValue(param_id, rate);
+      this->Normalize( param_id );
+    this->Regularize( param_id );
+    ComputeUpdateValue( param_id, rate );
   }
   this->net_->Update();
 }
@@ -271,42 +256,57 @@ void DqnSolver<Dtype>::Solve( const char* resume_file ) {
     this->Restore(resume_file);
   }
   
+  const int stopIter = this->param_.max_iter();
+  while ( this->iter_ < stopIter ) {
+    actionLog_.Clear();
+    for ( int i = 0; i < evalFreq_; ++i ) {
+      bool learn = true;
+      PlayEpisode( learn, GetEpsilon() );
+    }
+    actionLog_.Report();
+    actionLog_.Clear();
+    Evaluate();
+    actionLog_.Report();
+  }
+ 
   LOG(INFO) << "Optimization Done.";
 }
 
+template <typename Dtype>
 float DqnSolver<Dtype>::PlayEpisode( bool learn, float epsilon ) {
   float reward = 0.0;
   environment_.ResetGame();
-  state = environment_.GetState( true );
-  LOG(INFO) << "Starting an episode with epsilon = " << epsilon
-    << ", learn = " << learn;
+  State<Dtype> state = environment_.GetState( true );
   while ( state.isValid() ) {
     state = PlayStep( state, &reward, epsilon );
     const bool display = this->param_.display() 
       && this->iter_ % this->param_.display() == 0;
-    if ( learn && ExpHistory_.size() > learnStart_ ) {
-      if ( this->iter_ % updateFreq_ == 0 ) {
-        ZeroGradients();
-        for (int i = 0; i < this->param_.iter_size(); ++i) {
-          TrainStep();
+    if ( learn ) {
+      if ( this->iter_ > learnStart_ ) {
+        if ( this->iter_ % updateFreq_ == 0 ) {
+          ZeroGradients();
+          for (int i = 0; i < this->param_.iter_size(); ++i) {
+            TrainStep();
+          }
+          this->ApplyUpdate();
         }
-        this->ApplyUpdate();
+        if ( this->iter_ % syncFreq_ == 0 ) {
+          SyncTargetNet();
+        }
+        if ( display ) {
+          LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
+          LOG(INFO) << "  Average Q value = " << predBlob_->asum_data() / legalActionCount_;
+        }
+        if ( this->param_.snapshot() 
+          && this->iter_ % this->param_.snapshot() == 0 ) {
+          this->Snapshot();
+        }
       }
-      if ( this->iter_ % syncFreq_ == 0 ) {
-        SyncTargetNet();
-      }
-      if ( display ) {
-        float epsilon = (this->iter_ > learnStart_) ? GetEpsilon() : 1.0;
-        LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
-        LOG(INFO) << "  Average Q value = " << predBlob_->asum_data() / legalActionCount_;
-      }
-      if ( this->param_.snapshot() 
-        && this->iter_ % this->param_.snapshot() == 0 ) {
-      this->Snapshot();
+      ++this->iter_;
     }
-    ++this->iter_;
   }
   return reward;
+}
 
 template <typename Dtype>
 void DqnSolver<Dtype>::Evaluate() {
