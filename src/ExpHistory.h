@@ -7,7 +7,7 @@
 template <typename Dtype>
 class ExpHistory {
 public:
-  ExpHistory ( int n );
+  ExpHistory ( int capacity );
   
   void AddExperience( Transition<Dtype> exp );
   Transition<Dtype> & Sample();
@@ -21,17 +21,17 @@ private:
 };
 
 template <typename Dtype>
-ExpHistory<Dtype>::ExpHistory ( int n ) : capacity_( n ) {
+ExpHistory<Dtype>::ExpHistory ( int capacity ) : capacity_( capacity ) {
 }
 
 template <typename Dtype>
 void ExpHistory<Dtype>::AddExperience( Transition<Dtype> exp ) {
   int cur;
-  if ( history_.size() < capacity_ ) {
+  if ( size() < capacity_ ) {
+    cur = size();
     history_.push_back( exp );
-    cur = history_.size();
   } else {
-    cur = currentIndex_++;
+    cur = currentIndex_ + 1;
     if ( cur == capacity_ )
       cur = 0;
     history_[cur] = exp;
