@@ -87,7 +87,7 @@ protected:
   
   void Step( int );
   State<Dtype> PlayStep( State<Dtype> state, float* totalReward, float epsilon );
-  Dtype TrainStep();
+  void TrainStep();
   
   void ZeroGradients();
   void ApplyUpdate();

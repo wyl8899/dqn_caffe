@@ -165,23 +165,26 @@ State<Dtype> DqnSolver<Dtype>::PlayStep( State<Dtype> nowState, float* totalRewa
 }
 
 template <typename Dtype>
-Dtype DqnSolver<Dtype>::TrainStep() {
+void DqnSolver<Dtype>::TrainStep() {
   Transition<Dtype> trans = expHistory_.Sample();
   float reward;
+  // for transition (s, a, r, s'):
+  //   expected_reward = r, if s' is terminal
+  //   expected_reward = r + gamma * max(a'){target_Q(s', a')}, otherwise
   if ( trans.state_1.isValid() ) {
     trans.state_1.Feed( stateTargetBlob_ );
-    this->targetNet_->ForwardTo( lossLayerID_ - 1 );
+    targetNet_->ForwardTo( lossLayerID_ - 1 );
     float pred = actionTargetBlob_->cpu_data()[1];
     reward = trans.reward + gamma_ * pred;
   } else {
     reward = trans.reward;
   }
+  // accumulate the gradient of Loss = (expected_reward - Q(s, a))^2
   trans.state_0.Feed( stateBlob_ );
+  this->net_->ForwardTo( lossLayerID_ - 1 );
   FeedReward( trans.action, reward );
-  Dtype loss;
-  this->net_->ForwardPrefilled( &loss );
+  this->net_->ForwardFrom( lossLayerID_ );
   this->net_->Backward();
-  return loss;
 }
 
 template <typename Dtype>
