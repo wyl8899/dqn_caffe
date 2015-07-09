@@ -64,6 +64,7 @@ void DqnSolver<Dtype>::InitTargetNet() {
   CHECK( this->param_.has_net() );
   caffe::ReadNetParamsFromTextFileOrDie( this->param_.net(), &netParam );
   targetNet_.reset( new Net<Dtype>( netParam ) );
+  SyncTargetNet();
 }
 
 template <typename Dtype>
@@ -261,60 +262,6 @@ void DqnSolver<Dtype>::ZeroGradients() {
 }
 
 template <typename Dtype>
-void DqnSolver<Dtype>::Step ( int iters ) {
-  vector<Blob<Dtype>*> bottom_vec;
-  const int start_iter = this->iter_;
-  const int stop_iter = this->iter_ + iters;
-  int average_loss = this->param_.average_loss();
-  vector<Dtype> losses;
-  Dtype smoothed_loss = 0;
-  State<Dtype> nowState;
-
-  while (this->iter_ < stop_iter) {
-    const bool display = this->param_.display() 
-      && this->iter_ % this->param_.display() == 0;
-    const bool update = this->iter_ > learnStart_
-      && this->iter_ % updateFreq_ == 0;
-    const bool eval = evalFreq_ && this->iter_ % evalFreq_ == 0;
-    const bool sync = this->iter_ % syncFreq_ == 0;
-    this->net_->set_debug_info(display && this->param_.debug_info());
-   
-    // This happens when game-over occurs, or at the first iteration.
-    if ( !nowState.isValid() ) {
-      environment_.ResetGame();
-      nowState = environment_.GetState( true );
-    }
-    nowState = PlayStep( nowState, NULL, GetEpsilon() );
-    
-    if ( update ) {
-      ZeroGradients();
-      for (int i = 0; i < this->param_.iter_size(); ++i) {
-        TrainStep();
-      }
-      this->ApplyUpdate();
-    }
-    if ( sync ) {
-      SyncTargetNet();
-    }
-    if ( eval ) {
-      Evaluate();
-    }
-    if ( display ) {
-      float epsilon = (this->iter_ > learnStart_) ? GetEpsilon() : 1.0;
-      LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
-      LOG(INFO) << "  Average Q value = " << predBlob_->asum_data() / legalActionCount_;
-    }
-
-    ++this->iter_;
-
-    if (this->param_.snapshot() 
-        && this->iter_ % this->param_.snapshot() == 0) {
-      this->Snapshot();
-    }
-  }
-}
-
-template <typename Dtype>
 void DqnSolver<Dtype>::Solve( const char* resume_file ) {
   LOG(INFO) << "DqnSolver : Solving " << this->net_->name();
   LOG(INFO) << "Learning Rate Policy: " << this->param_.lr_policy();
@@ -323,31 +270,43 @@ void DqnSolver<Dtype>::Solve( const char* resume_file ) {
     LOG(INFO) << "Restoring previous solver status from " << resume_file;
     this->Restore(resume_file);
   }
-
-  Step(this->param_.max_iter() - this->iter_);
   
-  // If we haven't already, save a snapshot after optimization, unless
-  // overridden by setting snapshot_after_train := false
-  if (this->param_.snapshot_after_train()
-      && (!this->param_.snapshot() || this->iter_ % this->param_.snapshot() != 0)) {
-    this->Snapshot();
-  }
-  // After the optimization is done, run an additional train and test pass to
-  // display the train and test loss/outputs if appropriate (based on the
-  // display and test_interval settings, respectively).  Unlike in the rest of
-  // training, for the train net we only run a forward pass as we've already
-  // updated the parameters "max_iter" times -- this final pass is only done to
-  // display the loss, which is computed in the forward pass.
-  if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
-    Dtype loss;
-    this->net_->ForwardPrefilled(&loss);
-    LOG(INFO) << "Iteration " << this->iter_ << ", loss = " << loss;
-  }
-  if (this->param_.test_interval() && this->iter_ % this->param_.test_interval() == 0) {
-    this->TestAll();
-  }
   LOG(INFO) << "Optimization Done.";
 }
+
+float DqnSolver<Dtype>::PlayEpisode( bool learn, float epsilon ) {
+  float reward = 0.0;
+  environment_.ResetGame();
+  state = environment_.GetState( true );
+  LOG(INFO) << "Starting an episode with epsilon = " << epsilon
+    << ", learn = " << learn;
+  while ( state.isValid() ) {
+    state = PlayStep( state, &reward, epsilon );
+    const bool display = this->param_.display() 
+      && this->iter_ % this->param_.display() == 0;
+    if ( learn && ExpHistory_.size() > learnStart_ ) {
+      if ( this->iter_ % updateFreq_ == 0 ) {
+        ZeroGradients();
+        for (int i = 0; i < this->param_.iter_size(); ++i) {
+          TrainStep();
+        }
+        this->ApplyUpdate();
+      }
+      if ( this->iter_ % syncFreq_ == 0 ) {
+        SyncTargetNet();
+      }
+      if ( display ) {
+        float epsilon = (this->iter_ > learnStart_) ? GetEpsilon() : 1.0;
+        LOG(INFO) << "Iteration " << this->iter_ << ", epsilon = " << epsilon;
+        LOG(INFO) << "  Average Q value = " << predBlob_->asum_data() / legalActionCount_;
+      }
+      if ( this->param_.snapshot() 
+        && this->iter_ % this->param_.snapshot() == 0 ) {
+      this->Snapshot();
+    }
+    ++this->iter_;
+  }
+  return reward;
 
 template <typename Dtype>
 void DqnSolver<Dtype>::Evaluate() {
@@ -355,12 +314,8 @@ void DqnSolver<Dtype>::Evaluate() {
   float totalReward = 0.0;
   State<Dtype> state;
   for ( int i = 0; i < count; ++i ) {
-    float reward = 0.0;
-    environment_.ResetGame();
-    state = environment_.GetState( true );
-    while ( state.isValid() ) {
-      state = PlayStep( state, &reward, epsilon_ );
-    }
+    const bool update = false;
+    float reward = PlayEpisode( update, epsilon_ );
     LOG(INFO) << "    Evaluate: Episode #" << i << " ends with score " << reward;
     totalReward += reward;
   }
