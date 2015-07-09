@@ -5,7 +5,7 @@ lr_policy: "fixed"
 
 momentum: 0.95
 
-display: 2500
+display: 5000
 
 iter_size: 32
 

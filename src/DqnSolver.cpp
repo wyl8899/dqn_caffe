@@ -133,12 +133,7 @@ void DqnSolver<Dtype>::FeedReward( int action, float reward ) {
 
 template <typename Dtype>
 State<Dtype> DqnSolver<Dtype>::PlayStep( State<Dtype> nowState, float* totalReward, float epsilon ) {
-  int action;
-  if ( this->iter_ <= learnStart_ )
-    action = GetRandomAction();
-  else {
-    action = GetAction( nowState, epsilon );
-  }
+  int action = GetAction( nowState, epsilon );
   float reward;
   State<Dtype> state = environment_.Observe( action, &reward, frameSkip_ );
   expHistory_.AddExperience( Transition<Dtype>(nowState, action, reward, state ) );
@@ -264,6 +259,7 @@ void DqnSolver<Dtype>::Solve( const char* resume_file ) {
       PlayEpisode( learn, GetEpsilon() );
     }
     actionLog_.Report();
+    
     actionLog_.Clear();
     Evaluate();
     actionLog_.Report();
